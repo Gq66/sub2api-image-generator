@@ -1449,7 +1449,6 @@
   }
 
   const HISTORY_KEY = 'image_gen_history';
-  const MAX_HISTORY = 20;
 
   function getHistory() {
     try {
@@ -1462,30 +1461,25 @@
   function saveToHistory(entry) {
     const history = getHistory();
     history.unshift(entry);
-    if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
 
     let saved = false;
-    let retryCount = 0;
-    const maxRetries = 3;
 
-    while (!saved && retryCount < maxRetries) {
+    while (!saved) {
       try {
         localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
         saved = true;
       } catch (e) {
-        retryCount++;
-        console.warn('[历史记录] 存储失败，尝试 ' + retryCount + '/' + maxRetries + ':', e.message);
-
         if (e.name === 'QuotaExceededError' || e.code === 22) {
-          if (history.length > 5) {
-            history.length = Math.max(5, history.length - 5);
-            console.warn('[历史记录] 存储空间不足，已裁剪至 ' + history.length + ' 条记录');
+          if (history.length > 1) {
+            history.pop();
+            console.warn('[历史记录] 存储空间不足，已移除最旧记录，剩余 ' + history.length + ' 条');
           } else {
             console.error('[历史记录] 存储空间严重不足，无法保存');
             break;
           }
-        } else if (retryCount >= maxRetries) {
-          console.error('[历史记录] 存储失败，已重试 ' + maxRetries + ' 次');
+        } else {
+          console.error('[历史记录] 存储失败:', e.message);
+          break;
         }
       }
     }
