@@ -312,7 +312,10 @@
   }
 
   function buildSizeIntent(ratio, resolutionTier) {
-    if (ratio === '自动生成' || resolutionTier === 'auto') {
+    const isAutoRatio = (ratio === '自动生成');
+    const isAutoTier = (resolutionTier === 'auto');
+    
+    if (isAutoRatio && isAutoTier) {
       return {
         aspect: 'auto',
         resolution: 'auto',
@@ -324,8 +327,8 @@
       };
     }
     
-    const aspectKey = ratio.replace(/ 正方形| 横版| 竖版/g, '');
-    const resolutionKey = resolutionTier.toLowerCase();
+    const aspectKey = isAutoRatio ? '1:1' : ratio.replace(/ 正方形| 横版| 竖版/g, '');
+    const resolutionKey = isAutoTier ? '1k' : resolutionTier.toLowerCase();
     
     const sizeEntry = SIZE_MATRIX[aspectKey]?.[resolutionKey];
     const width = sizeEntry ? sizeEntry[0] : 1024;
@@ -1314,10 +1317,6 @@
           }
 
           const mimeType = getFormatMime(outputFormat);
-          const RATIO_CSS = { '自动生成': 'auto', '1:1 正方形': '1/1', '16:9 横版': '16/9', '4:3 横版': '4/3', '3:4 竖版': '3/4', '9:16 竖版': '9/16' };
-          const aspectRatio = RATIO_CSS[ratio] || 'auto';
-          const previewStyle = aspectRatio !== 'auto' ? ' style="aspect-ratio:' + aspectRatio + '"' : '';
-
           const now = new Date();
           const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
           const headTitle = mode === 'image' ? '参考图改绘结果' : '本次生成结果';
@@ -1330,13 +1329,28 @@
           successfulResults.forEach((result, idx) => {
             const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
             const badge = String(idx + 1).padStart(2, '0');
-            imagesHTML += '<div class="result-image-wrap"' + previewStyle + '><img src="' + dataURL + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div></div>';
+            imagesHTML += '<div class="result-image-wrap" data-index="' + idx + '"><img src="' + dataURL + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image" data-action="preview"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button><button type="button" class="result-action-btn" data-action="preview" data-index="' + idx + '" title="放大预览"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/></svg></button></div></div>';
           });
 
           canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="gen-multi-preview">' + imagesHTML + '</div></div>';
 
+          const previewImages = canvas.querySelectorAll('.result-image[data-action="preview"], .result-action-btn[data-action="preview"]');
+          previewImages.forEach(el => {
+            el.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const wrap = el.closest('.result-image-wrap');
+              const idx = parseInt(wrap?.dataset?.index ?? el.dataset?.index ?? '0');
+              const result = successfulResults[idx];
+              if (result) {
+                const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
+                showImageLightbox(dataURL);
+              }
+            });
+          });
+
           canvas.querySelectorAll('.result-action-btn[data-action="download"]').forEach(downloadBtn => {
-            downloadBtn.addEventListener('click', () => {
+            downloadBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
               const idx = parseInt(downloadBtn.dataset.index);
               const result = successfulResults[idx];
               if (result) {
@@ -1352,16 +1366,19 @@
             });
           });
 
-          saveToHistory({
-            id: Date.now(),
-            mode: mode === 'image' ? '图生图' : '文生图',
-            prompt: prompt.substring(0, 60),
-            count: successfulResults.length,
-            ratio: ratio,
-            format: outputFormat.toUpperCase(),
-            cost: panel.querySelector('.cost-value')?.textContent || '$0.00',
-            timestamp: now.toISOString(),
-            thumbnail: 'data:' + mimeType + ';base64,' + successfulResults[0].imageB64
+          const baseTimestamp = Date.now();
+          successfulResults.forEach((result, idx) => {
+            saveToHistory({
+              id: baseTimestamp + idx,
+              mode: mode === 'image' ? '图生图' : '文生图',
+              prompt: prompt.substring(0, 60),
+              count: 1,
+              ratio: ratio,
+              format: outputFormat.toUpperCase(),
+              cost: panel.querySelector('.cost-value')?.textContent || '$0.00',
+              timestamp: now.toISOString(),
+              thumbnail: 'data:' + mimeType + ';base64,' + result.imageB64
+            });
           });
 
         } catch (err) {
@@ -1385,6 +1402,52 @@
     });
   })();
 
+  function showImageLightbox(imageSrc) {
+    let overlay = document.getElementById('image-lightbox');
+    if (overlay) {
+      overlay.remove();
+    }
+
+    overlay = document.createElement('div');
+    overlay.id = 'image-lightbox';
+    overlay.className = 'lightbox-overlay';
+    overlay.innerHTML = '<div class="lightbox-backdrop"></div><div class="lightbox-container"><img src="' + imageSrc + '" alt="图片预览" class="lightbox-image"><button type="button" class="lightbox-close" title="关闭">&times;</button><button type="button" class="lightbox-download" title="下载"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div>';
+
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.classList.add('lightbox-active');
+    });
+
+    const closeLightbox = () => {
+      overlay.classList.remove('lightbox-active');
+      setTimeout(() => {
+        overlay.remove();
+      }, 300);
+    };
+
+    overlay.querySelector('.lightbox-backdrop').addEventListener('click', closeLightbox);
+    overlay.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+
+    overlay.querySelector('.lightbox-download').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = imageSrc;
+      a.download = 'image-' + Date.now() + '.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('开始下载图片', 'success');
+    });
+
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        closeLightbox();
+        document.removeEventListener('keydown', handleEscape);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+  }
+
   const HISTORY_KEY = 'image_gen_history';
   const MAX_HISTORY = 20;
 
@@ -1400,9 +1463,33 @@
     const history = getHistory();
     history.unshift(entry);
     if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    } catch (e) { /* storage full */ }
+
+    let saved = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (!saved && retryCount < maxRetries) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        saved = true;
+      } catch (e) {
+        retryCount++;
+        console.warn('[历史记录] 存储失败，尝试 ' + retryCount + '/' + maxRetries + ':', e.message);
+
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+          if (history.length > 5) {
+            history.length = Math.max(5, history.length - 5);
+            console.warn('[历史记录] 存储空间不足，已裁剪至 ' + history.length + ' 条记录');
+          } else {
+            console.error('[历史记录] 存储空间严重不足，无法保存');
+            break;
+          }
+        } else if (retryCount >= maxRetries) {
+          console.error('[历史记录] 存储失败，已重试 ' + maxRetries + ' 次');
+        }
+      }
+    }
+
     renderHistory();
   }
 
@@ -1431,11 +1518,22 @@
         ? '今天 ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0')
         : (date.getMonth() + 1) + '月' + date.getDate() + '日 ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
       const thumbStyle = entry.thumbnail
-        ? 'background-image:url(\'' + entry.thumbnail + '\');background-size:cover;background-position:center'
+        ? 'background-image:url(\'' + entry.thumbnail + '\');background-size:cover;background-position:center;cursor:pointer'
         : '';
 
-      return '<article class="history-card" data-id="' + entry.id + '"><div class="history-thumb" style="' + thumbStyle + '"></div><div class="history-info"><h3>' + (entry.prompt || '未命名') + '</h3><p>' + entry.mode + ' · ' + entry.count + ' 张 · ' + entry.cost + '</p><span>' + timeLabel + ' · ' + entry.ratio + ' · ' + entry.format + '</span></div><button type="button" class="history-delete" data-id="' + entry.id + '" title="删除记录">&times;</button></article>';
+      return '<article class="history-card" data-id="' + entry.id + '" data-thumbnail="' + (entry.thumbnail || '') + '"><div class="history-thumb" style="' + thumbStyle + '"></div><div class="history-info"><h3>' + (entry.prompt || '未命名') + '</h3><p>' + entry.mode + ' · ' + entry.count + ' 张 · ' + entry.cost + '</p><span>' + timeLabel + ' · ' + entry.ratio + ' · ' + entry.format + '</span></div><button type="button" class="history-delete" data-id="' + entry.id + '" title="删除记录">&times;</button></article>';
     }).join('');
+
+    $$('.history-thumb', list).forEach(thumb => {
+      thumb.addEventListener('click', e => {
+        e.stopPropagation();
+        const card = thumb.closest('.history-card');
+        const thumbnail = card?.dataset?.thumbnail;
+        if (thumbnail) {
+          showImageLightbox(thumbnail);
+        }
+      });
+    });
 
     $$('.history-delete', list).forEach(btn => {
       btn.addEventListener('click', e => {
