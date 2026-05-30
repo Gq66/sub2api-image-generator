@@ -162,6 +162,34 @@
     }, 3000);
   }
 
+  function showConfirm(title, message) {
+    return new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay';
+      overlay.innerHTML = '<div class="confirm-backdrop"></div><div class="confirm-dialog"><div class="confirm-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg></div><h3 class="confirm-title"></h3><p class="confirm-message"></p><div class="confirm-actions"><button type="button" class="confirm-btn confirm-btn-cancel">取消</button><button type="button" class="confirm-btn confirm-btn-confirm">确认清空</button></div></div>';
+      overlay.querySelector('.confirm-title').textContent = title;
+      overlay.querySelector('.confirm-message').textContent = message;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(function() { overlay.classList.add('confirm-active'); });
+
+      function close(result) {
+        overlay.classList.remove('confirm-active');
+        setTimeout(function() { overlay.remove(); }, 250);
+        resolve(result);
+      }
+
+      overlay.querySelector('.confirm-backdrop').addEventListener('click', function() { close(false); });
+      overlay.querySelector('.confirm-btn-cancel').addEventListener('click', function() { close(false); });
+      overlay.querySelector('.confirm-btn-confirm').addEventListener('click', function() { close(true); });
+      document.addEventListener('keydown', function handler(e) {
+        if (e.key === 'Escape') {
+          document.removeEventListener('keydown', handler);
+          close(false);
+        }
+      });
+    });
+  }
+
   (() => {
     const modes = ['text', 'image', 'history'];
     const tabs = $$('.image-tabs .image-tab[data-mode]');
@@ -1644,12 +1672,13 @@
       clearBtn.type = 'button';
       clearBtn.className = 'history-clear-btn';
       clearBtn.textContent = '清空记录';
-      clearBtn.addEventListener('click', () => {
+      clearBtn.addEventListener('click', async () => {
         if (getHistory().length === 0) {
           showToast('暂无记录可清空', 'info');
           return;
         }
-        if (confirm('确认清空所有历史记录吗？请确认已保存所需图片')) {
+        const confirmed = await showConfirm('清空记录', '确认清空所有历史记录吗？清空后将无法恢复');
+        if (confirmed) {
           clearHistory();
           showToast('记录已清空', 'success');
         }
