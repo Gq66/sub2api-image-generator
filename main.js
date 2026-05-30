@@ -231,6 +231,175 @@
     });
   })();
 
+  // ============================================================
+  // SizeIntent 尺寸意图自动降级模块
+  // ============================================================
+
+  const SIZE_MATRIX = {
+    '1:1': {
+      '1k': [1024, 1024],
+      '2k': [2048, 2048],
+      '4k': [4096, 4096]
+    },
+    '4:3': {
+      '1k': [1365, 1024],
+      '2k': [2730, 2048],
+      '4k': [5461, 4096]
+    },
+    '3:4': {
+      '1k': [1024, 1365],
+      '2k': [2048, 2730],
+      '4k': [4096, 5461]
+    },
+    '16:9': {
+      '1k': [1536, 864],
+      '2k': [2048, 1152],
+      '4k': [3840, 2160]
+    },
+    '9:16': {
+      '1k': [864, 1536],
+      '2k': [1152, 2048],
+      '4k': [2160, 3840]
+    }
+  };
+
+  const ASPECT_PROMPT_MAP = {
+    '1:1': 'square composition',
+    '4:3': 'landscape composition, 4:3 aspect ratio',
+    '3:4': 'portrait composition, 3:4 aspect ratio',
+    '16:9': 'cinematic wide composition, 16:9 aspect ratio',
+    '9:16': 'vertical mobile composition, 9:16 aspect ratio'
+  };
+
+  const RESOLUTION_PROMPT_MAP = {
+    '1k': 'high detail',
+    '2k': 'ultra detailed, high resolution',
+    '4k': 'extremely detailed, 4k quality, ultra high resolution'
+  };
+
+  function getGPTModelCapabilities(modelID) {
+    const normalized = String(modelID || '').toLowerCase();
+    
+    if (normalized.startsWith('gpt-image') || normalized.startsWith('chatgpt-image')) {
+      return {
+        supportsSize: true,
+        supportedSizes: ['1024x1024', '1536x1024', '1024x1536'],
+        maxResolution: 1536
+      };
+    }
+    
+    if (normalized.startsWith('dall-e-3')) {
+      return {
+        supportsSize: true,
+        supportedSizes: ['1024x1024', '1792x1024', '1024x1792'],
+        maxResolution: 1792
+      };
+    }
+    
+    if (normalized.startsWith('dall-e-2')) {
+      return {
+        supportsSize: true,
+        supportedSizes: ['256x256', '512x512', '1024x1024'],
+        maxResolution: 1024
+      };
+    }
+    
+    return {
+      supportsSize: true,
+      supportedSizes: ['1024x1024', '1536x1024', '1024x1536'],
+      maxResolution: 1536
+    };
+  }
+
+  function buildSizeIntent(ratio, resolutionTier) {
+    if (ratio === '自动生成' || resolutionTier === 'auto') {
+      return {
+        aspect: 'auto',
+        resolution: 'auto',
+        width: null,
+        height: null,
+        size: 'auto',
+        aspectRatio: null,
+        promptEnhancement: ''
+      };
+    }
+    
+    const aspectKey = ratio.replace(/ 正方形| 横版| 竖版/g, '');
+    const resolutionKey = resolutionTier.toLowerCase();
+    
+    const sizeEntry = SIZE_MATRIX[aspectKey]?.[resolutionKey];
+    const width = sizeEntry ? sizeEntry[0] : 1024;
+    const height = sizeEntry ? sizeEntry[1] : 1024;
+    
+    const aspectDesc = ASPECT_PROMPT_MAP[aspectKey] || '';
+    const resolutionDesc = RESOLUTION_PROMPT_MAP[resolutionKey] || '';
+    const promptEnhancement = [aspectDesc, resolutionDesc].filter(Boolean).join(', ');
+    
+    return {
+      aspect: aspectKey,
+      resolution: resolutionKey,
+      width,
+      height,
+      size: `${width}x${height}`,
+      aspectRatio: `${width}:${height}`,
+      promptEnhancement
+    };
+  }
+
+  function applySizeIntentToTool(tool, sizeIntent, modelID) {
+    const capabilities = getGPTModelCapabilities(modelID);
+    
+    console.log('[生图调试] ===== 尺寸应用 =====');
+    console.log('[生图调试] 模型ID:', modelID);
+    console.log('[生图调试] 模型能力:', JSON.stringify(capabilities, null, 2));
+    console.log('[生图调试] 期望尺寸:', sizeIntent.size);
+    
+    if (sizeIntent.size === 'auto') {
+      tool.size = 'auto';
+      console.log('[生图调试] 结果: 自动模式，使用auto');
+      return tool;
+    }
+    
+    if (capabilities.supportedSizes.includes(sizeIntent.size)) {
+      tool.size = sizeIntent.size;
+      console.log('[生图调试] 结果: 模型直接支持，使用', tool.size);
+      return tool;
+    }
+    
+    console.log('[生图调试] 模型不直接支持', sizeIntent.size, '，开始降级...');
+    
+    const scale = Math.min(
+      capabilities.maxResolution / sizeIntent.width,
+      capabilities.maxResolution / sizeIntent.height,
+      1
+    );
+    const scaledWidth = Math.floor(sizeIntent.width * scale);
+    const scaledHeight = Math.floor(sizeIntent.height * scale);
+    
+    const roundTo64 = (n) => Math.round(n / 64) * 64;
+    tool.size = `${roundTo64(scaledWidth)}x${roundTo64(scaledHeight)}`;
+    
+    console.log('[生图调试] 缩放比例:', scale.toFixed(4));
+    console.log('[生图调试] 缩放后:', scaledWidth + 'x' + scaledHeight);
+    console.log('[生图调试] 对齐64后:', tool.size);
+    console.log('[生图调试] 最终降级: ' + sizeIntent.size + ' -> ' + tool.size + ' (模型最大' + capabilities.maxResolution + ')');
+    return tool;
+  }
+
+  function enhancePromptWithSizeIntent(prompt, sizeIntent) {
+    if (!sizeIntent.promptEnhancement) return prompt;
+    
+    const lowerPrompt = prompt.toLowerCase();
+    const skipKeywords = ['aspect ratio', 'resolution', 'composition', 'detail', '4k', '2k', '1k'];
+    const hasExistingSizeHint = skipKeywords.some(kw => lowerPrompt.includes(kw));
+    
+    if (hasExistingSizeHint) return prompt;
+    
+    return `${prompt}, ${sizeIntent.promptEnhancement}`;
+  }
+
+  console.log('[生图调试] SizeIntent模块已加载');
+
   const SELECT_OPTIONS = {
     'api-key': [
       { value: 'pool-gpt', label: '对接中转 · GPT【主推号池】' },
@@ -918,28 +1087,51 @@
     });
     const activeCard = panel.querySelector('.ratio-card-active');
     const ratio = activeCard?.querySelector('.ratio-label')?.textContent || '自动生成';
-    const SIZE_MAP = { '自动生成': 'auto', '1:1 正方形': '1024x1024', '16:9 横版': '1536x1024', '4:3 横版': '1024x768', '3:4 竖版': '768x1024', '9:16 竖版': '1024x1536' };
-    const size = SIZE_MAP[ratio] || 'auto';
+    
+    const tierBtn = panel.querySelector('.tier-btn-active');
+    const resolutionTier = tierBtn?.dataset?.tier || 'auto';
+    
+    console.log('[生图调试] ===== 参数解析 =====');
+    console.log('[生图调试] 画面比例:', ratio);
+    console.log('[生图调试] 分辨率档位:', resolutionTier);
+    console.log('[生图调试] 模型:', model);
+    console.log('[生图调试] 质量:', quality);
+    console.log('[生图调试] 输出格式:', outputFormat);
+    
+    const sizeIntent = buildSizeIntent(ratio, resolutionTier);
+    console.log('[生图调试] SizeIntent:', JSON.stringify(sizeIntent, null, 2));
+    
     const range = panel.querySelector('.image-range');
     const count = range ? parseInt(range.value) || 1 : 1;
-    return { prompt, model, quality, outputFormat, size, ratio, count };
+    return { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count };
   }
 
-  async function textToImage({ prompt, baseURL, apiKey, imageModel, size, quality, outputFormat, onProgress }) {
+  async function textToImage({ prompt, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
+    const tool = {
+      type: 'image_generation',
+      model: imageModel || 'gpt-image-2',
+      action: 'generate',
+      size: 'auto',
+      quality: quality || 'auto',
+      output_format: outputFormat || 'png',
+      moderation: 'low',
+      partial_images: 0
+    };
+    
+    applySizeIntentToTool(tool, sizeIntent, imageModel);
+    const enhancedPrompt = enhancePromptWithSizeIntent(prompt, sizeIntent);
+    
+    console.log('[生图调试] ===== 最终请求 =====');
+    console.log('[生图调试] tool.size:', tool.size);
+    console.log('[生图调试] tool.model:', tool.model);
+    console.log('[生图调试] tool.quality:', tool.quality);
+    console.log('[生图调试] enhancedPrompt:', enhancedPrompt);
+    
     const body = {
       model: 'gpt-5.5',
       instructions: 'You are a tool runner. Pass the user prompt to image_generation VERBATIM. DO NOT rewrite, expand, polish, or revise it in any way. Use the exact text the user gave.',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
-      tools: [{
-        type: 'image_generation',
-        model: imageModel || 'gpt-image-2',
-        action: 'generate',
-        size: size === 'auto' ? '1024x1024' : size,
-        quality: quality || 'auto',
-        output_format: outputFormat || 'png',
-        moderation: 'low',
-        partial_images: 0
-      }],
+      input: [{ role: 'user', content: [{ type: 'input_text', text: enhancedPrompt }] }],
+      tools: [tool],
       tool_choice: { type: 'image_generation' },
       reasoning: { effort: 'xhigh' },
       store: false,
@@ -952,9 +1144,9 @@
         console.log('[生图调试] Responses API 返回503，自动回退到 Images API');
         const imagesBody = {
           model: imageModel || 'gpt-image-2',
-          prompt,
+          prompt: enhancedPrompt,
           n: 1,
-          size: size === 'auto' ? '1024x1024' : size,
+          size: tool.size === 'auto' ? '1024x1024' : tool.size,
           quality: quality || 'auto',
           output_format: outputFormat || 'png',
           response_format: 'b64_json'
@@ -965,8 +1157,24 @@
     }
   }
 
-  async function imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel, size, quality, outputFormat, onProgress }) {
-    const content = [{ type: 'input_text', text: prompt }];
+  async function imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
+    const tool = {
+      type: 'image_generation',
+      model: imageModel || 'gpt-image-2',
+      action: 'edit',
+      size: 'auto',
+      quality: quality || 'auto',
+      output_format: outputFormat || 'png',
+      moderation: 'low',
+      partial_images: 0
+    };
+    
+    applySizeIntentToTool(tool, sizeIntent, imageModel);
+    const enhancedPrompt = enhancePromptWithSizeIntent(prompt, sizeIntent);
+    
+    console.log('[生图调试] 图生图应用SizeIntent后tool:', { size: tool.size });
+    
+    const content = [{ type: 'input_text', text: enhancedPrompt }];
     for (const dataURL of sourceImages) {
       content.push({ type: 'input_image', image_url: dataURL });
     }
@@ -974,16 +1182,7 @@
       model: 'gpt-5.5',
       instructions: 'You are a tool runner. Pass the user prompt to image_generation VERBATIM. DO NOT rewrite, expand, polish, or revise it in any way. Use the exact text the user gave.',
       input: [{ role: 'user', content }],
-      tools: [{
-        type: 'image_generation',
-        model: imageModel || 'gpt-image-2',
-        action: 'edit',
-        size: size === 'auto' ? '1024x1024' : size,
-        quality: quality || 'auto',
-        output_format: outputFormat || 'png',
-        moderation: 'low',
-        partial_images: 0
-      }],
+      tools: [tool],
       tool_choice: { type: 'image_generation' },
       reasoning: { effort: 'xhigh' },
       store: false,
@@ -1006,10 +1205,10 @@
           const blob = new Blob([bytes], { type: mimeType });
           form.append(i === 0 ? 'image' : 'image[]', blob, 'source-' + (i + 1) + '.' + ext);
         }
-        form.append('prompt', prompt);
+        form.append('prompt', enhancedPrompt);
         form.append('model', imageModel || 'gpt-image-2');
         form.append('n', '1');
-        form.append('size', size === 'auto' ? '1024x1024' : size);
+        form.append('size', tool.size === 'auto' ? '1024x1024' : tool.size);
         form.append('quality', quality || 'auto');
         form.append('output_format', outputFormat || 'png');
         form.append('response_format', 'b64_json');
@@ -1029,7 +1228,7 @@
         const panel = btn.closest('.mode-panel');
         if (!panel) return;
 
-        const { prompt, model, quality, outputFormat, size, ratio, count } = getPanelParams(panel);
+        const { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count } = getPanelParams(panel);
         if (!prompt) {
           showToast('请输入提示词', 'warning');
           const ta = panel.querySelector('textarea.input, textarea.prompt-textarea');
@@ -1087,9 +1286,9 @@
           for (let i = 0; i < count; i++) {
             tasks.push(async () => {
               if (mode === 'image') {
-                return imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+                return imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel: model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
               } else {
-                return textToImage({ prompt, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+                return textToImage({ prompt, baseURL, apiKey, imageModel: model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
               }
             });
           }
