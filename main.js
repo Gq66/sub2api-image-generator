@@ -33,6 +33,97 @@
     isEmbedded: iframeState.isEmbedded
   });
 
+  (function initDarkMode() {
+    const root = document.documentElement;
+
+    function applyTheme(isDark) {
+      root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      console.log('[深色模式]', isDark ? '深色' : '浅色');
+    }
+
+    function getSystemDark() {
+      try {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function getParentDark() {
+      try {
+        if (window.parent && window.parent !== window) {
+          const parentDoc = window.parent.document;
+          const parentTheme = parentDoc.documentElement.getAttribute('data-theme');
+          if (parentTheme) return parentTheme === 'dark';
+          const parentCS = window.parent.getComputedStyle(parentDoc.documentElement);
+          if (parentCS.colorScheme && parentCS.colorScheme.includes('dark')) return true;
+          const parentBg = parentCS.backgroundColor;
+          if (parentBg) {
+            const match = parentBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if (match) {
+              const brightness = (parseInt(match[1]) * 299 + parseInt(match[2]) * 587 + parseInt(match[3]) * 114) / 1000;
+              return brightness < 128;
+            }
+          }
+        }
+      } catch (e) {
+        console.log('[深色模式] 无法访问父级窗口:', e.message);
+      }
+      return null;
+    }
+
+    let currentDark = false;
+
+    function syncTheme() {
+      const parentDark = getParentDark();
+      const isDark = parentDark !== null ? parentDark : getSystemDark();
+      if (isDark !== currentDark) {
+        currentDark = isDark;
+        applyTheme(isDark);
+      }
+    }
+
+    syncTheme();
+
+    try {
+      if (window.parent && window.parent !== window) {
+        const parentDoc = window.parent.document;
+        const observer = new MutationObserver(function() {
+          syncTheme();
+        });
+        observer.observe(parentDoc.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-theme', 'class', 'style']
+        });
+        console.log('[深色模式] 已监听父级窗口变化');
+      }
+    } catch (e) {
+      console.log('[深色模式] 无法监听父级窗口:', e.message);
+    }
+
+    try {
+      if (window.matchMedia) {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        const handler = function() {
+          if (getParentDark() === null) {
+            syncTheme();
+          }
+        };
+        if (mediaQuery.addEventListener) {
+          mediaQuery.addEventListener('change', handler);
+        } else if (mediaQuery.addListener) {
+          mediaQuery.addListener(handler);
+        }
+        console.log('[深色模式] 已监听系统主题变化');
+      }
+    } catch (e) {
+      console.log('[深色模式] 无法监听系统主题:', e.message);
+    }
+
+    window.addEventListener('focus', syncTheme);
+    setInterval(syncTheme, 2000);
+  })();
+
   async function callSub2API(path) {
     if (!iframeState.token || !iframeState.srcHost) return null;
     const url = new URL(path, iframeState.srcHost + '/').toString();
