@@ -25,6 +25,13 @@
     userId: cleanText(_urlParams.get('user_id')),
     isEmbedded: cleanText(_urlParams.get('ui_mode')) === 'embedded'
   };
+  console.log('[生图调试] iframe参数:', {
+    hasToken: !!iframeState.token,
+    tokenLen: iframeState.token.length,
+    srcHost: iframeState.srcHost,
+    userId: iframeState.userId,
+    isEmbedded: iframeState.isEmbedded
+  });
 
   async function callSub2API(path) {
     if (!iframeState.token || !iframeState.srcHost) return null;
@@ -354,6 +361,7 @@
           value: cleanText(item.key),
           label: cleanText(item.name || item.key || '未命名密钥')
         }));
+        console.log('[生图调试] 获取到API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
 
         if (apiKeys.length > 0) {
           SELECT_OPTIONS['api-key'] = apiKeys;
@@ -669,10 +677,18 @@
     let lastError;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        const fullURL = baseURL + '/v1/responses';
+        const maskedKey = apiKey ? (apiKey.slice(0, 8) + '****' + apiKey.slice(-4)) : 'null';
+        console.groupCollapsed('[生图调试] 第 ' + attempt + ' 次请求');
+        console.log('请求地址:', fullURL);
+        console.log('API Key:', maskedKey);
+        console.log('请求体:', JSON.stringify(requestBody, null, 2));
+        console.groupEnd();
+
         if (attempt > 1 && onProgress) {
           onProgress('第 ' + attempt + ' 次重试中...');
         }
-        const response = await fetch(baseURL + '/v1/responses', {
+        const response = await fetch(fullURL, {
           method: 'POST',
           headers: {
             'Authorization': 'Bearer ' + apiKey,
@@ -681,12 +697,15 @@
           },
           body: JSON.stringify(requestBody)
         });
+        console.log('[生图调试] 响应状态:', response.status, response.statusText);
         if (!response.ok) {
           const errText = await response.text();
+          console.error('[生图调试] 错误响应原文:', errText);
           let msg = 'HTTP ' + response.status;
           try {
             const errJson = JSON.parse(errText);
             msg = errJson.error?.message || errJson.message || msg;
+            console.error('[生图调试] 错误JSON:', errJson);
           } catch {}
           const err = new Error(msg);
           err.httpStatus = response.status;
@@ -694,7 +713,10 @@
         }
         if (!response.body) {
           const raw = await response.text();
-          return extractImageResult(raw);
+          console.log('[生图调试] 非流式响应原文(前2000字符):', raw.slice(0, 2000));
+          const result = extractImageResult(raw);
+          console.log('[生图调试] 提取结果:', result ? '成功(有imageB64)' : '失败(null)');
+          return result;
         }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -715,18 +737,21 @@
               if (payload && payload !== '[DONE]') {
                 try {
                   const evt = JSON.parse(payload);
-                  if (evt.type && onProgress) {
-                    const MAP = {
-                      'response.created': '请求已创建',
-                      'response.in_progress': '模型处理中',
-                      'response.image_generation_call.in_progress': '图片工具已启动',
-                      'response.image_generation_call.generating': '图片正在生成',
-                      'response.image_generation_call.partial_image': '已收到图片数据片段',
-                      'response.output_item.done': '图片生成完成',
-                      'response.completed': '接口已完成'
-                    };
-                    const desc = MAP[evt.type];
-                    if (desc) onProgress(desc);
+                  if (evt.type) {
+                    console.log('[生图调试] SSE事件:', evt.type, evt.error ? '| 错误:' + JSON.stringify(evt.error) : '');
+                    if (onProgress) {
+                      const MAP = {
+                        'response.created': '请求已创建',
+                        'response.in_progress': '模型处理中',
+                        'response.image_generation_call.in_progress': '图片工具已启动',
+                        'response.image_generation_call.generating': '图片正在生成',
+                        'response.image_generation_call.partial_image': '已收到图片数据片段',
+                        'response.output_item.done': '图片生成完成',
+                        'response.completed': '接口已完成'
+                      };
+                      const desc = MAP[evt.type];
+                      if (desc) onProgress(desc);
+                    }
                   }
                 } catch {}
               }
@@ -734,9 +759,15 @@
             newline = pending.indexOf('\n');
           }
         }
-        return extractImageResult(raw);
+        console.log('[生图调试] SSE流总长度:', raw.length, '字符');
+        console.log('[生图调试] SSE流原文(前3000字符):', raw.slice(0, 3000));
+        const result = extractImageResult(raw);
+        console.log('[生图调试] 提取结果:', result ? '成功(有imageB64)' : '失败(null)');
+        return result;
       } catch (err) {
         lastError = err;
+        console.error('[生图调试] 第 ' + attempt + ' 次请求失败:', err.message, 'httpStatus:', err.httpStatus || 'N/A');
+        if (err.httpStatus === 503) throw err;
         if (attempt < MAX_ATTEMPTS && isRetryableError(err)) {
           if (onProgress) onProgress('服务暂时不可用，' + (RETRY_BACKOFF_MS / 1000) + '秒后重试 (' + attempt + '/' + MAX_ATTEMPTS + ')');
           await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
@@ -746,6 +777,65 @@
       }
     }
     throw lastError;
+  }
+
+  async function requestImagesAPI(baseURL, apiKey, requestBody, onProgress) {
+    const fullURL = baseURL + '/v1/images/generations';
+    const maskedKey = apiKey ? (apiKey.slice(0, 8) + '****' + apiKey.slice(-4)) : 'null';
+    console.log('[生图调试] 回退到 Images API:', fullURL);
+    if (onProgress) onProgress('正在通过备用接口生成...');
+    const response = await fetch(fullURL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+    console.log('[生图调试] Images API 响应状态:', response.status);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[生图调试] Images API 错误:', errText);
+      let msg = 'HTTP ' + response.status;
+      try { msg = JSON.parse(errText).error?.message || msg; } catch {}
+      const err = new Error(msg);
+      err.httpStatus = response.status;
+      throw err;
+    }
+    const data = await response.json();
+    console.log('[生图调试] Images API 返回数据结构:', Object.keys(data));
+    const first = data.data?.[0];
+    if (!first?.b64_json) {
+      throw new Error('Images API 未返回可用图片数据');
+    }
+    return { imageB64: first.b64_json, revisedPrompt: first.revised_prompt || '' };
+  }
+
+  async function requestImagesEditAPI(baseURL, apiKey, formData, onProgress) {
+    const fullURL = baseURL + '/v1/images/edits';
+    console.log('[生图调试] 回退到 Images Edit API:', fullURL);
+    if (onProgress) onProgress('正在通过备用接口生成...');
+    const response = await fetch(fullURL, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey },
+      body: formData
+    });
+    console.log('[生图调试] Images Edit API 响应状态:', response.status);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[生图调试] Images Edit API 错误:', errText);
+      let msg = 'HTTP ' + response.status;
+      try { msg = JSON.parse(errText).error?.message || msg; } catch {}
+      const err = new Error(msg);
+      err.httpStatus = response.status;
+      throw err;
+    }
+    const data = await response.json();
+    const first = data.data?.[0];
+    if (!first?.b64_json) {
+      throw new Error('Images Edit API 未返回可用图片数据');
+    }
+    return { imageB64: first.b64_json, revisedPrompt: first.revised_prompt || '' };
   }
 
   function getSelectedApiKey(panel) {
@@ -760,6 +850,7 @@
     if (!selectedLabel) return null;
     const options = SELECT_OPTIONS['api-key'] || [];
     const match = options.find(o => o.label === selectedLabel);
+    console.log('[生图调试] 选中的密钥:', { selectedLabel, matched: !!match, allOptions: options.map(o => o.label) });
     return match ? match.value : null;
   }
 
@@ -808,7 +899,24 @@
       store: false,
       stream: true
     };
-    return requestResponsesAPI(baseURL, apiKey, body, onProgress);
+    try {
+      return await requestResponsesAPI(baseURL, apiKey, body, onProgress);
+    } catch (err) {
+      if (err.httpStatus === 503) {
+        console.log('[生图调试] Responses API 返回503，自动回退到 Images API');
+        const imagesBody = {
+          model: imageModel || 'gpt-image-2',
+          prompt,
+          n: 1,
+          size: size === 'auto' ? '1024x1024' : size,
+          quality: quality || 'auto',
+          output_format: outputFormat || 'png',
+          response_format: 'b64_json'
+        };
+        return requestImagesAPI(baseURL, apiKey, imagesBody, onProgress);
+      }
+      throw err;
+    }
   }
 
   async function imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel, size, quality, outputFormat, onProgress }) {
@@ -835,7 +943,34 @@
       store: false,
       stream: true
     };
-    return requestResponsesAPI(baseURL, apiKey, body, onProgress);
+    try {
+      return await requestResponsesAPI(baseURL, apiKey, body, onProgress);
+    } catch (err) {
+      if (err.httpStatus === 503) {
+        console.log('[生图调试] Responses API 返回503，自动回退到 Images Edit API');
+        const form = new FormData();
+        for (let i = 0; i < sourceImages.length; i++) {
+          const dataURL = sourceImages[i];
+          const base64Part = dataURL.slice(dataURL.indexOf(',') + 1);
+          const mimeType = dataURL.slice(5, dataURL.indexOf(';')) || 'image/png';
+          const ext = mimeType.split('/')[1] || 'png';
+          const binary = atob(base64Part);
+          const bytes = new Uint8Array(binary.length);
+          for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+          const blob = new Blob([bytes], { type: mimeType });
+          form.append(i === 0 ? 'image' : 'image[]', blob, 'source-' + (i + 1) + '.' + ext);
+        }
+        form.append('prompt', prompt);
+        form.append('model', imageModel || 'gpt-image-2');
+        form.append('n', '1');
+        form.append('size', size === 'auto' ? '1024x1024' : size);
+        form.append('quality', quality || 'auto');
+        form.append('output_format', outputFormat || 'png');
+        form.append('response_format', 'b64_json');
+        return requestImagesEditAPI(baseURL, apiKey, form, onProgress);
+      }
+      throw err;
+    }
   }
 
   (() => {
