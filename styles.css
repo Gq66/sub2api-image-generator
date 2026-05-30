@@ -860,34 +860,55 @@ h3 {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(10px, 1.4vw, 14px);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: clamp(12px, 1.4vw, 16px);
+  align-content: start;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .history-card {
-  display: grid;
+  position: relative;
+  display: flex;
   min-height: 0;
-  grid-template-columns: minmax(86px, 0.34fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
   overflow: hidden;
-  border-radius: 18px;
-  padding: 10px;
+  border-radius: 16px;
+  padding: 0;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  cursor: default;
+}
+
+.history-card:hover {
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  transform: translateY(-2px);
 }
 
 .history-thumb {
-  height: 100%;
-  min-height: 88px;
-  border-radius: 14px;
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 75%;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.history-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.18), transparent 40%);
+  pointer-events: none;
 }
 
 .history-card h3 {
   overflow: hidden;
   color: var(--ink);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: block;
 }
 
 .history-card p,
@@ -899,16 +920,16 @@ h3 {
 }
 
 .history-card p {
-  margin-top: 5px;
+  margin-top: 4px;
   color: #475569;
   font-size: 12px;
 }
 
 .history-card span {
-  margin-top: 8px;
+  margin-top: 6px;
   color: #94a3b8;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .history-panel {
@@ -921,10 +942,11 @@ h3 {
 }
 
 .history-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 16px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
   margin-bottom: 16px;
 }
 
@@ -932,11 +954,14 @@ h3 {
   color: #1e293b;
   font-size: 16px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .history-head p {
   color: #64748b;
   font-size: 13px;
+  width: 100%;
+  order: 3;
 }
 
 .history-empty {
@@ -1484,6 +1509,87 @@ h3 {
   font-weight: 700;
 }
 
+.gen-multi-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.gen-multi-preview .result-image-wrap {
+  position: relative;
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #f1f5f9;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gen-multi-preview .result-image-wrap:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+}
+
+.gen-multi-preview .result-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.gen-multi-preview .result-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+}
+
+.gen-multi-preview .result-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2;
+}
+
+.gen-multi-preview .result-image-wrap:hover .result-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.gen-multi-preview .result-action-btn {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #334155;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gen-multi-preview .result-action-btn:hover {
+  background: #14b8a6;
+  color: #ffffff;
+}
+
 .gen-grid {
   display: grid;
   flex: 1 1 auto;
@@ -1666,20 +1772,24 @@ h3 {
 }
 
 .history-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
   display: flex;
   width: 28px;
   height: 28px;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   border-radius: 8px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.9);
   color: #94a3b8;
   font-size: 18px;
   font-weight: 700;
   line-height: 1;
   opacity: 0;
   transition: background 0.15s ease, color 0.15s ease, opacity 0.2s ease;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1);
 }
 
 .history-card:hover .history-delete {
@@ -1687,20 +1797,21 @@ h3 {
 }
 
 .history-delete:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
 }
 
 .history-info {
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
+  padding: 10px 12px 12px;
 }
 
 .history-info h3 {
   overflow: hidden;
   color: var(--ink);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1716,7 +1827,7 @@ h3 {
   margin-top: 6px;
   color: #94a3b8;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .history-clear-btn {
@@ -1735,17 +1846,23 @@ h3 {
 }
 
 .history-head {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 @media (max-width: 760px) {
   .history-head {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 8px;
   }
 
   .history-clear-btn {
-    justify-self: start;
+    align-self: flex-start;
+  }
+
+  .history-list {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   }
 }
 

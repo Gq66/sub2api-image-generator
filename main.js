@@ -588,8 +588,12 @@
 
   updateCost();
 
+  // 最大重试次数：请求失败时最多重试3次
   const MAX_ATTEMPTS = 3;
+  // 重试等待间隔：两次重试之间暂停15秒（单位：毫秒）
   const RETRY_BACKOFF_MS = 15000;
+  // 最大并发数：同时生成的图片数量上限，避免并发过高导致接口限流
+  const MAX_CONCURRENT = 10;
 
   function isRetryableError(err) {
     const msg = (err.message || '').toLowerCase();
@@ -838,6 +842,46 @@
     return { imageB64: first.b64_json, revisedPrompt: first.revised_prompt || '' };
   }
 
+  async function generateWithConcurrency(tasks, maxConcurrent, onProgress) {
+    const results = new Array(tasks.length);
+    let completedCount = 0;
+    let nextIndex = 0;
+
+    function updateProgress() {
+      if (onProgress) {
+        onProgress('已完成 ' + completedCount + '/' + tasks.length + ' 张图片');
+      }
+    }
+
+    async function runTask(index) {
+      const task = tasks[index];
+      try {
+        results[index] = await task();
+        completedCount++;
+        updateProgress();
+      } catch (err) {
+        results[index] = { error: err, index };
+        completedCount++;
+        updateProgress();
+      }
+    }
+
+    const workers = [];
+    const concurrentCount = Math.min(maxConcurrent, tasks.length);
+
+    for (let i = 0; i < concurrentCount; i++) {
+      workers.push((async () => {
+        while (nextIndex < tasks.length) {
+          const currentIndex = nextIndex++;
+          await runTask(currentIndex);
+        }
+      })());
+    }
+
+    await Promise.all(workers);
+    return results;
+  }
+
   function getSelectedApiKey(panel) {
     const trigger = panel.querySelector('.select-trigger');
     if (!trigger) return null;
@@ -876,7 +920,9 @@
     const ratio = activeCard?.querySelector('.ratio-label')?.textContent || '自动生成';
     const SIZE_MAP = { '自动生成': 'auto', '1:1 正方形': '1024x1024', '16:9 横版': '1536x1024', '4:3 横版': '1024x768', '3:4 竖版': '768x1024', '9:16 竖版': '1024x1536' };
     const size = SIZE_MAP[ratio] || 'auto';
-    return { prompt, model, quality, outputFormat, size, ratio };
+    const range = panel.querySelector('.image-range');
+    const count = range ? parseInt(range.value) || 1 : 1;
+    return { prompt, model, quality, outputFormat, size, ratio, count };
   }
 
   async function textToImage({ prompt, baseURL, apiKey, imageModel, size, quality, outputFormat, onProgress }) {
@@ -983,7 +1029,7 @@
         const panel = btn.closest('.mode-panel');
         if (!panel) return;
 
-        const { prompt, model, quality, outputFormat, size, ratio } = getPanelParams(panel);
+        const { prompt, model, quality, outputFormat, size, ratio, count } = getPanelParams(panel);
         if (!prompt) {
           showToast('请输入提示词', 'warning');
           const ta = panel.querySelector('textarea.input, textarea.prompt-textarea');
@@ -1017,9 +1063,8 @@
 
         const startTime = Date.now();
         let timerInterval = null;
-        let lastProgress = '';
 
-        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">正在生成图片，请稍候...</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text"></p></div>';
+        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">正在并行生成 ' + count + ' 张图片，请稍候...</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text">准备中...</p></div>';
 
         const timerEl = canvas.querySelector('.gen-timer');
         const progressEl = canvas.querySelector('.gen-progress-text');
@@ -1032,63 +1077,92 @@
         }, 100);
 
         function onProgress(desc) {
-          lastProgress = desc;
           if (progressEl) progressEl.textContent = desc;
         }
 
         const baseURL = iframeState.srcHost || '';
 
         try {
-          let result;
-          if (mode === 'image') {
-            result = await imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress });
-          } else {
-            result = await textToImage({ prompt, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress });
+          const tasks = [];
+          for (let i = 0; i < count; i++) {
+            tasks.push(async () => {
+              if (mode === 'image') {
+                return imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+              } else {
+                return textToImage({ prompt, baseURL, apiKey, imageModel: model, size, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+              }
+            });
           }
+
+          const results = await generateWithConcurrency(tasks, MAX_CONCURRENT, onProgress);
 
           if (timerInterval) clearInterval(timerInterval);
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-          if (!result || !result.imageB64) {
-            throw new Error('接口已返回内容，但没有发现可用的图片数据');
+          const successfulResults = [];
+          const failedIndices = [];
+          results.forEach((result, index) => {
+            if (result && result.imageB64) {
+              successfulResults.push({ ...result, index });
+            } else {
+              failedIndices.push(index);
+              console.error('[生图调试] 图片 ' + (index + 1) + ' 生成失败:', result?.error || '无图片数据');
+            }
+          });
+
+          if (successfulResults.length === 0) {
+            throw new Error('所有图片生成均失败，请稍后重试');
           }
 
           const mimeType = getFormatMime(outputFormat);
-          const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
-
-          const now = new Date();
-          const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-          const headTitle = mode === 'image' ? '参考图改绘结果' : '本次生成结果';
-          const headDesc = mode === 'image'
-            ? '基于参考图生成，耗时 ' + elapsed + ' 秒。'
-            : '提示词已提交，耗时 ' + elapsed + ' 秒生成完成。';
-
           const RATIO_CSS = { '自动生成': 'auto', '1:1 正方形': '1/1', '16:9 横版': '16/9', '4:3 横版': '4/3', '3:4 竖版': '3/4', '9:16 竖版': '9/16' };
           const aspectRatio = RATIO_CSS[ratio] || 'auto';
           const previewStyle = aspectRatio !== 'auto' ? ' style="aspect-ratio:' + aspectRatio + '"' : '';
 
-          canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="gen-single-preview"' + previewStyle + '><div class="result-image-wrap"><img src="' + dataURL + '" alt="生成图片" loading="lazy" class="result-image"><span class="result-badge">01</span></div><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div><div class="result-meta"><strong>图片 01</strong><span>' + ratio + ' · ' + outputFormat.toUpperCase() + '</span></div></div></div>';
+          const now = new Date();
+          const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+          const headTitle = mode === 'image' ? '参考图改绘结果' : '本次生成结果';
+          const failNote = failedIndices.length > 0 ? '（' + failedIndices.length + ' 张生成失败）' : '';
+          const headDesc = mode === 'image'
+            ? '基于参考图生成 ' + successfulResults.length + '/' + count + ' 张，耗时 ' + elapsed + ' 秒' + failNote
+            : '并行生成 ' + successfulResults.length + '/' + count + ' 张，耗时 ' + elapsed + ' 秒' + failNote;
 
-          canvas.querySelector('.result-action-btn[data-action="download"]')?.addEventListener('click', () => {
-            const a = document.createElement('a');
-            a.href = dataURL;
-            a.download = 'generated-image-' + Date.now() + '.' + outputFormat;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            showToast('开始下载图片', 'success');
+          let imagesHTML = '';
+          successfulResults.forEach((result, idx) => {
+            const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
+            const badge = String(idx + 1).padStart(2, '0');
+            imagesHTML += '<div class="result-image-wrap"' + previewStyle + '><img src="' + dataURL + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div></div>';
+          });
+
+          canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="gen-multi-preview">' + imagesHTML + '</div></div>';
+
+          canvas.querySelectorAll('.result-action-btn[data-action="download"]').forEach(downloadBtn => {
+            downloadBtn.addEventListener('click', () => {
+              const idx = parseInt(downloadBtn.dataset.index);
+              const result = successfulResults[idx];
+              if (result) {
+                const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
+                const a = document.createElement('a');
+                a.href = dataURL;
+                a.download = 'generated-image-' + Date.now() + '-' + (idx + 1) + '.' + outputFormat;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                showToast('开始下载图片 ' + (idx + 1), 'success');
+              }
+            });
           });
 
           saveToHistory({
             id: Date.now(),
             mode: mode === 'image' ? '图生图' : '文生图',
             prompt: prompt.substring(0, 60),
-            count: 1,
+            count: successfulResults.length,
             ratio: ratio,
             format: outputFormat.toUpperCase(),
             cost: panel.querySelector('.cost-value')?.textContent || '$0.00',
             timestamp: now.toISOString(),
-            thumbnail: dataURL
+            thumbnail: 'data:' + mimeType + ';base64,' + successfulResults[0].imageB64
           });
 
         } catch (err) {
@@ -1147,7 +1221,7 @@
     const history = getHistory();
 
     if (history.length === 0) {
-      list.innerHTML = '<div class="history-empty" style="grid-column:1/-1"><div class="image-empty-icon"><svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><h3>暂无记录</h3><p>生成图片后记录将显示在这里。</p></div>';
+      list.innerHTML = '<div class="history-empty" style="grid-column:1/-1"><div class="image-empty-icon"><svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><h3>暂无记录</h3><p>生成图片后记录将显示在这里</p></div>';
       return;
     }
 
