@@ -190,14 +190,24 @@
     setInterval(syncTheme, 2000);
   })();
 
-  async function callSub2API(path) {
+  async function callSub2API(path, options = {}) {
     if (!iframeState.token || !iframeState.srcHost) return null;
     const url = new URL(path, iframeState.srcHost + '/').toString();
+    const method = options.method || 'GET';
+    const headers = {
+      'Authorization': 'Bearer ' + iframeState.token,
+      'Accept': 'application/json',
+      ...(options.headers || {})
+    };
+    if (options.body !== undefined && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
     const resp = await fetch(url, {
-      headers: {
-        'Authorization': 'Bearer ' + iframeState.token,
-        'Accept': 'application/json'
-      },
+      method,
+      headers,
+      body: options.body !== undefined
+        ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body))
+        : undefined,
       mode: 'cors',
       credentials: 'omit',
       cache: 'no-store'
@@ -212,6 +222,13 @@
   function unwrapAPIData(resp) {
     if (resp && typeof resp === 'object' && 'code' in resp && 'data' in resp) return resp.data;
     return resp;
+  }
+
+  function unwrapAPIList(resp) {
+    const data = unwrapAPIData(resp);
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.items)) return data.items;
+    return [];
   }
 
   function findNumericField(value, keys) {
@@ -718,6 +735,8 @@
       ]
     };
 
+  const AUTO_IMAGE_KEY_GROUP_NAME = '稳定生图';
+
   (() => {
     let openDropdown = null;
 
@@ -744,11 +763,13 @@
       const trigger = field.querySelector('.select-trigger');
       if (!trigger) return;
       const wrapper = trigger.closest('.relative') || trigger.parentElement;
-      const options = SELECT_OPTIONS[optionsKey] || [];
-      let currentValue = options[0]?.value || '';
+      const initialOptions = SELECT_OPTIONS[optionsKey] || [];
+      let currentValue = trigger.dataset.value || initialOptions[0]?.value || '';
 
       trigger.addEventListener('click', e => {
         e.stopPropagation();
+        const options = SELECT_OPTIONS[optionsKey] || [];
+        const selectedValue = trigger.dataset.value || currentValue;
         if (openDropdown === wrapper) {
           closeDropdown();
           return;
@@ -760,12 +781,12 @@
         options.forEach(opt => {
           const item = document.createElement('button');
           item.type = 'button';
-          item.className = 'select-option' + (opt.value === currentValue ? ' select-option-active' : '');
+          item.className = 'select-option' + (opt.value === selectedValue ? ' select-option-active' : '');
           item.textContent = opt.label;
           item.addEventListener('click', ev => {
             ev.stopPropagation();
             currentValue = opt.value;
-            trigger.querySelector('.select-value').textContent = opt.label;
+            setSelectValue(trigger, opt);
             closeDropdown();
             updateCost();
           });
@@ -788,6 +809,148 @@
       });
     }
 
+    function getAPIKeyFields() {
+      return $$('.api-key-field');
+    }
+
+    function isAPIKeyField(field) {
+      const label = field?.querySelector('.input-label');
+      const labelText = label?.textContent?.trim() || '';
+      return labelText.includes('API') || labelText.includes('密钥');
+    }
+
+    function setSelectValue(trigger, option) {
+      if (!trigger || !option) return;
+      trigger.dataset.value = option.value || '';
+      const valueEl = trigger.querySelector('.select-value');
+      if (valueEl) valueEl.textContent = option.label || option.value || '';
+    }
+
+    function applySelectedAPIKey(option) {
+      if (!option) return;
+      getAPIKeyFields().forEach(field => {
+        const trigger = field.querySelector('.select-trigger');
+        setSelectValue(trigger, option);
+      });
+    }
+
+    function normalizeAPIKeyOption(item) {
+      const value = cleanText(item?.key || item?.value || item?.token);
+      const label = cleanText(item?.name || item?.label || value || '未命名密钥');
+      if (!value) return null;
+      return {
+        value,
+        label,
+        id: item?.id,
+        groupId: item?.group_id ?? item?.group?.id ?? null,
+        raw: item
+      };
+    }
+
+    function normalizeGroup(item) {
+      if (!item || typeof item !== 'object') return null;
+      return {
+        id: item.id ?? item.group_id,
+        name: cleanText(item.name || item.display_name || item.label || ''),
+        raw: item
+      };
+    }
+
+    function findImageGroup(groups) {
+      const normalized = groups.map(normalizeGroup).filter(g => g && g.id !== undefined && g.id !== null);
+      return normalized.find(g => g.name === AUTO_IMAGE_KEY_GROUP_NAME)
+        || normalized.find(g => g.name.includes(AUTO_IMAGE_KEY_GROUP_NAME))
+        || normalized.find(g => g.name.includes('生图'))
+        || normalized.find(g => g.name.toLowerCase().includes('image'));
+    }
+
+    async function fetchAvailableGroups() {
+      const resp = await callSub2API('/api/v1/groups/available');
+      return unwrapAPIList(resp);
+    }
+
+    async function createImageAPIKey() {
+      if (!iframeState.token || !iframeState.srcHost) {
+        throw new Error('缺少登录参数，无法自动创建 API Key');
+      }
+      const groups = await fetchAvailableGroups();
+      const group = findImageGroup(groups);
+      if (!group) {
+        throw new Error('未找到“稳定生图”分组，请先在后台创建或开放该分组');
+      }
+      const timestamp = new Date();
+      const name = 'AI生图 Key ' + String(timestamp.getMonth() + 1).padStart(2, '0') + String(timestamp.getDate()).padStart(2, '0') + '-' + String(timestamp.getHours()).padStart(2, '0') + String(timestamp.getMinutes()).padStart(2, '0');
+      const resp = await callSub2API('/api/v1/keys', {
+        method: 'POST',
+        body: {
+          name,
+          group_id: Number(group.id)
+        }
+      });
+      const created = unwrapAPIData(resp);
+      const option = normalizeAPIKeyOption(created);
+      if (!option) {
+        throw new Error('API Key 已创建，但接口未返回可用密钥');
+      }
+      return option;
+    }
+
+    async function fetchAndPopulateApiKeys(selectedValue) {
+      if (!iframeState.isEmbedded || !iframeState.token) return [];
+
+      try {
+        const resp = await callSub2API('/api/v1/keys').catch(() => null);
+        const items = unwrapAPIList(resp);
+        if (!Array.isArray(items) || items.length === 0) return [];
+
+        const apiKeys = items.map(normalizeAPIKeyOption).filter(Boolean);
+        console.log('[生图调试] 获取到API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
+
+        if (apiKeys.length > 0) {
+          SELECT_OPTIONS['api-key'] = apiKeys;
+        }
+
+        const selected = apiKeys.find(k => k.value === selectedValue) || apiKeys[0];
+        applySelectedAPIKey(selected);
+        return apiKeys;
+      } catch (e) {
+        // fallback to hardcoded options
+        return [];
+      }
+    }
+
+    function initCreateKeyButtons() {
+      $$('.inline-key-create').forEach(button => {
+        button.addEventListener('click', async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (button.disabled) return;
+
+          const allButtons = $$('.inline-key-create');
+          allButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.dataset.originalText = btn.textContent;
+            btn.textContent = '创建中...';
+          });
+
+          try {
+            const createdOption = await createImageAPIKey();
+            await fetchAndPopulateApiKeys(createdOption.value);
+            applySelectedAPIKey(createdOption);
+            showToast('已创建并选择“稳定生图”API Key', 'success');
+          } catch (e) {
+            showToast(e.message || '自动创建 API Key 失败', 'error');
+            console.error('[API密钥] 自动创建失败:', e);
+          } finally {
+            allButtons.forEach(btn => {
+              btn.disabled = false;
+              btn.textContent = btn.dataset.originalText || '使用 AI生图 Key';
+            });
+          }
+        });
+      });
+    }
+
     function initPanelSelects(panel) {
       if (!panel) return;
       const fields = $$('.image-field', panel);
@@ -798,7 +961,7 @@
         if (!label) return;
         const labelText = label.textContent.trim();
         let key = '';
-        if (labelText.includes('API') || labelText.includes('密钥')) key = 'api-key';
+        if (isAPIKeyField(field)) key = 'api-key';
         else if (labelText.includes('模型')) key = 'model';
         else if (labelText.includes('质量')) key = 'quality';
         else if (labelText.includes('背景')) key = 'background';
@@ -807,42 +970,11 @@
       });
     }
 
-    async function fetchAndPopulateApiKeys() {
-      if (!iframeState.isEmbedded || !iframeState.token) return;
-
-      try {
-        const resp = await callSub2API('/api/v1/keys').catch(() => null);
-        const items = resp?.data?.items || resp?.data || [];
-        if (!Array.isArray(items) || items.length === 0) return;
-
-        const apiKeys = items.map(item => ({
-          value: cleanText(item.key),
-          label: cleanText(item.name || item.key || '未命名密钥')
-        }));
-        console.log('[生图调试] 获取到API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
-
-        if (apiKeys.length > 0) {
-          SELECT_OPTIONS['api-key'] = apiKeys;
-        }
-
-        $$('.select-trigger').forEach(trigger => {
-          const field = trigger.closest('.image-field');
-          if (!field) return;
-          const label = field.querySelector('.input-label');
-          if (!label) return;
-          if (label.textContent.trim().includes('API') || label.textContent.trim().includes('密钥')) {
-            trigger.querySelector('.select-value').textContent = SELECT_OPTIONS['api-key'][0]?.label || '';
-          }
-        });
-      } catch (e) {
-        // fallback to hardcoded options
-      }
-    }
-
     (async () => {
       await fetchAndPopulateApiKeys();
       initPanelSelects($('#panel-text'));
       initPanelSelects($('#panel-image'));
+      initCreateKeyButtons();
     })();
   })();
 
