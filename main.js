@@ -25,6 +25,7 @@
     userId: cleanText(_urlParams.get('user_id')),
     isEmbedded: cleanText(_urlParams.get('ui_mode')) === 'embedded'
   };
+  const PRICE_PER_IMAGE = 0.06;
   console.log('[生图调试] iframe参数:', {
     hasToken: !!iframeState.token,
     tokenLen: iframeState.token.length,
@@ -1007,8 +1008,6 @@
     panel._getFiles = () => files;
     updateCount();
   })();
-
-  const PRICE_PER_IMAGE = 0.06;
 
   function formatImageCost(count) {
     const safeCount = Math.max(0, Number(count) || 0);
