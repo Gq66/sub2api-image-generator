@@ -616,6 +616,9 @@ h3 {
 }
 
 .advanced-panel[open] {
+  position: relative;
+  z-index: 20;
+  overflow: visible;
   border-color: rgba(20, 184, 166, 0.45);
   background: #ffffff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
@@ -660,6 +663,7 @@ h3 {
 
 .advanced-panel[open] .advanced-body {
   height: auto;
+  overflow: visible;
   padding-bottom: clamp(9px, 1.35vh, 12px);
   opacity: 1;
   transform: translateY(0);
