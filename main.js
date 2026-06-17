@@ -1249,34 +1249,17 @@
     console.log('[生图调试] tool.quality:', tool.quality);
     console.log('[生图调试] enhancedPrompt:', enhancedPrompt);
     
-    const body = {
-      model: 'gpt-5.5',
-      instructions: 'You are a tool runner. Pass the user prompt to image_generation VERBATIM. DO NOT rewrite, expand, polish, or revise it in any way. Use the exact text the user gave.',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: enhancedPrompt }] }],
-      tools: [tool],
-      tool_choice: { type: 'image_generation' },
-      reasoning: { effort: 'xhigh' },
-      store: false,
-      stream: true
+    const imagesBody = {
+      model: imageModel || 'gpt-image-2',
+      prompt: enhancedPrompt,
+      n: 1,
+      size: tool.size === 'auto' ? '1024x1024' : tool.size,
+      quality: quality || 'auto',
+      output_format: outputFormat || 'png',
+      response_format: 'b64_json'
     };
-    try {
-      return await requestResponsesAPI(baseURL, apiKey, body, onProgress);
-    } catch (err) {
-      if (err.httpStatus === 503) {
-        console.log('[生图调试] Responses API 返回503，自动回退到 Images API');
-        const imagesBody = {
-          model: imageModel || 'gpt-image-2',
-          prompt: enhancedPrompt,
-          n: 1,
-          size: tool.size === 'auto' ? '1024x1024' : tool.size,
-          quality: quality || 'auto',
-          output_format: outputFormat || 'png',
-          response_format: 'b64_json'
-        };
-        return requestImagesAPI(baseURL, apiKey, imagesBody, onProgress);
-      }
-      throw err;
-    }
+    console.log('[生图调试] 直接使用 Images API，跳过 Responses API');
+    return requestImagesAPI(baseURL, apiKey, imagesBody, onProgress);
   }
 
   async function imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
@@ -1296,48 +1279,27 @@
     
     console.log('[生图调试] 图生图应用SizeIntent后tool:', { size: tool.size });
     
-    const content = [{ type: 'input_text', text: enhancedPrompt }];
-    for (const dataURL of sourceImages) {
-      content.push({ type: 'input_image', image_url: dataURL });
+    const form = new FormData();
+    for (let i = 0; i < sourceImages.length; i++) {
+      const dataURL = sourceImages[i];
+      const base64Part = dataURL.slice(dataURL.indexOf(',') + 1);
+      const mimeType = dataURL.slice(5, dataURL.indexOf(';')) || 'image/png';
+      const ext = mimeType.split('/')[1] || 'png';
+      const binary = atob(base64Part);
+      const bytes = new Uint8Array(binary.length);
+      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+      const blob = new Blob([bytes], { type: mimeType });
+      form.append(i === 0 ? 'image' : 'image[]', blob, 'source-' + (i + 1) + '.' + ext);
     }
-    const body = {
-      model: 'gpt-5.5',
-      instructions: 'You are a tool runner. Pass the user prompt to image_generation VERBATIM. DO NOT rewrite, expand, polish, or revise it in any way. Use the exact text the user gave.',
-      input: [{ role: 'user', content }],
-      tools: [tool],
-      tool_choice: { type: 'image_generation' },
-      reasoning: { effort: 'xhigh' },
-      store: false,
-      stream: true
-    };
-    try {
-      return await requestResponsesAPI(baseURL, apiKey, body, onProgress);
-    } catch (err) {
-      if (err.httpStatus === 503) {
-        console.log('[生图调试] Responses API 返回503，自动回退到 Images Edit API');
-        const form = new FormData();
-        for (let i = 0; i < sourceImages.length; i++) {
-          const dataURL = sourceImages[i];
-          const base64Part = dataURL.slice(dataURL.indexOf(',') + 1);
-          const mimeType = dataURL.slice(5, dataURL.indexOf(';')) || 'image/png';
-          const ext = mimeType.split('/')[1] || 'png';
-          const binary = atob(base64Part);
-          const bytes = new Uint8Array(binary.length);
-          for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-          const blob = new Blob([bytes], { type: mimeType });
-          form.append(i === 0 ? 'image' : 'image[]', blob, 'source-' + (i + 1) + '.' + ext);
-        }
-        form.append('prompt', enhancedPrompt);
-        form.append('model', imageModel || 'gpt-image-2');
-        form.append('n', '1');
-        form.append('size', tool.size === 'auto' ? '1024x1024' : tool.size);
-        form.append('quality', quality || 'auto');
-        form.append('output_format', outputFormat || 'png');
-        form.append('response_format', 'b64_json');
-        return requestImagesEditAPI(baseURL, apiKey, form, onProgress);
-      }
-      throw err;
-    }
+    form.append('prompt', enhancedPrompt);
+    form.append('model', imageModel || 'gpt-image-2');
+    form.append('n', '1');
+    form.append('size', tool.size === 'auto' ? '1024x1024' : tool.size);
+    form.append('quality', quality || 'auto');
+    form.append('output_format', outputFormat || 'png');
+    form.append('response_format', 'b64_json');
+    console.log('[生图调试] 直接使用 Images Edit API，跳过 Responses API');
+    return requestImagesEditAPI(baseURL, apiKey, form, onProgress);
   }
 
   (() => {
