@@ -736,6 +736,7 @@
     };
 
   const AUTO_IMAGE_KEY_GROUP_NAME = '稳定生图';
+  let imageKeyCreationPromise = null;
 
   (() => {
     let openDropdown = null;
@@ -864,35 +865,64 @@
         || normalized.find(g => g.name.toLowerCase().includes('image'));
     }
 
+    function findReusableImageAPIKey(apiKeys, groupId) {
+      if (!Array.isArray(apiKeys) || groupId === undefined || groupId === null) return null;
+      const targetGroupId = Number(groupId);
+      if (!Number.isFinite(targetGroupId)) return null;
+      return apiKeys.find(key => Number(key.groupId) === targetGroupId) || null;
+    }
+
     async function fetchAvailableGroups() {
       const resp = await callSub2API('/api/v1/groups/available');
       return unwrapAPIList(resp);
     }
 
     async function createImageAPIKey() {
-      if (!iframeState.token || !iframeState.srcHost) {
-        throw new Error('缺少登录参数，无法自动创建 API Key');
+      if (imageKeyCreationPromise) {
+        return imageKeyCreationPromise;
       }
-      const groups = await fetchAvailableGroups();
-      const group = findImageGroup(groups);
-      if (!group) {
-        throw new Error('未找到“稳定生图”分组，请先在后台创建或开放该分组');
-      }
-      const timestamp = new Date();
-      const name = 'AI生图 Key ' + String(timestamp.getMonth() + 1).padStart(2, '0') + String(timestamp.getDate()).padStart(2, '0') + '-' + String(timestamp.getHours()).padStart(2, '0') + String(timestamp.getMinutes()).padStart(2, '0');
-      const resp = await callSub2API('/api/v1/keys', {
-        method: 'POST',
-        body: {
-          name,
-          group_id: Number(group.id)
+
+      imageKeyCreationPromise = (async () => {
+        if (!iframeState.token || !iframeState.srcHost) {
+          throw new Error('缺少登录参数，无法自动创建 API Key');
         }
-      });
-      const created = unwrapAPIData(resp);
-      const option = normalizeAPIKeyOption(created);
-      if (!option) {
-        throw new Error('API Key 已创建，但接口未返回可用密钥');
+        const groups = await fetchAvailableGroups();
+        const group = findImageGroup(groups);
+        if (!group) {
+          throw new Error('未找到“稳定生图”分组，请先在后台创建或开放该分组');
+        }
+
+        const resp = await callSub2API('/api/v1/keys?page_size=1000&status=active&group_id=' + encodeURIComponent(group.id)).catch(() => null);
+        const existingKeys = unwrapAPIList(resp)
+          .map(normalizeAPIKeyOption)
+          .filter(Boolean);
+        const reusableKey = findReusableImageAPIKey(existingKeys, group.id);
+        if (reusableKey) {
+          return { option: reusableKey, created: false };
+        }
+
+        const timestamp = new Date();
+        const name = 'AI生图专用 Key ' + String(timestamp.getMonth() + 1).padStart(2, '0') + String(timestamp.getDate()).padStart(2, '0') + '-' + String(timestamp.getHours()).padStart(2, '0') + String(timestamp.getMinutes()).padStart(2, '0');
+        const createdResp = await callSub2API('/api/v1/keys', {
+          method: 'POST',
+          body: {
+            name,
+            group_id: Number(group.id)
+          }
+        });
+        const created = unwrapAPIData(createdResp);
+        const option = normalizeAPIKeyOption(created);
+        if (!option) {
+          throw new Error('API Key 已创建，但接口未返回可用密钥');
+        }
+        return { option, created: true };
+      })();
+
+      try {
+        return await imageKeyCreationPromise;
+      } finally {
+        imageKeyCreationPromise = null;
       }
-      return option;
     }
 
     async function fetchAndPopulateApiKeys(selectedValue) {
@@ -934,17 +964,17 @@
           });
 
           try {
-            const createdOption = await createImageAPIKey();
-            await fetchAndPopulateApiKeys(createdOption.value);
-            applySelectedAPIKey(createdOption);
-            showToast('已创建并选择“稳定生图”API Key', 'success');
+            const result = await createImageAPIKey();
+            await fetchAndPopulateApiKeys(result.option.value);
+            applySelectedAPIKey(result.option);
+            showToast(result.created ? '已创建并选择“稳定生图”API Key' : '已复用现有“稳定生图”API Key', 'success');
           } catch (e) {
             showToast(e.message || '自动创建 API Key 失败', 'error');
             console.error('[API密钥] 自动创建失败:', e);
           } finally {
             allButtons.forEach(btn => {
               btn.disabled = false;
-              btn.textContent = btn.dataset.originalText || '使用 AI生图 Key';
+              btn.textContent = btn.dataset.originalText || '使用 AI生图专用 Key';
             });
           }
         });
