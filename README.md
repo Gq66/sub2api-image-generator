@@ -1,6 +1,6 @@
 <div align="center">
 
-# 蓝鹰AI - 在线图片生成
+# Mf - 在线图片生成
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)
@@ -163,8 +163,8 @@ php -S localhost:8080
 
 MIT License
 
-Copyright (c) 2024 蓝鹰AI
+Copyright (c) 2024 Mf
 
-![Footer](https://img.shields.io/badge/ Made_with_❤️-by_蓝鹰AI-blue)
+![Footer](https://img.shields.io/badge/ Made_with_❤️-by_Mf-blue)
 
 </div>
