@@ -18,10 +18,28 @@
     }
   }
 
+  function normalizeWWWHost(hostname) {
+    return String(hostname || '').replace(/^www\./i, '');
+  }
+
+  function resolveSameSiteAPIOrigin(srcHost) {
+    if (!srcHost) return '';
+    try {
+      const srcURL = new URL(srcHost);
+      const pageURL = new URL(window.location.origin);
+      if (normalizeWWWHost(srcURL.hostname) === normalizeWWWHost(pageURL.hostname)) {
+        return pageURL.origin;
+      }
+      return srcURL.origin;
+    } catch {
+      return srcHost;
+    }
+  }
+
   const _urlParams = new URLSearchParams(window.location.search);
   const iframeState = {
     token: cleanText(_urlParams.get('token')),
-    srcHost: cleanURL(_urlParams.get('src_host')),
+    srcHost: resolveSameSiteAPIOrigin(cleanURL(_urlParams.get('src_host'))),
     userId: cleanText(_urlParams.get('user_id')),
     isEmbedded: cleanText(_urlParams.get('ui_mode')) === 'embedded'
   };
