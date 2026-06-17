@@ -7,7 +7,7 @@
     <meta name="referrer" content="no-referrer">
     <title>蓝鹰AI-在线图片生成</title>
     <link rel="icon" type="image/png" href="loog.png">
-    <link rel="stylesheet" href="styles.css?v=20260617-1659">
+    <link rel="stylesheet" href="styles.css?v=20260617-2355">
 </head>
 
 <body>
@@ -15,27 +15,51 @@
         <main class="page-layout">
             <section class="image-experience" aria-label="图像体验">
                 <div class="image-shell">
-                    <div class="image-tabs" role="tablist" aria-label="Image experience modes">
-                        <button type="button" class="image-tab image-tab-active" data-mode="text" role="tab"
-                            id="tab-text" aria-selected="true" aria-controls="panel-text"><svg class="h-4 w-4"
-                                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z">
-                                </path>
-                            </svg><span>文生图</span></button><button type="button" class="image-tab" data-mode="image"
-                            role="tab" id="tab-image" aria-selected="false" aria-controls="panel-image"><svg
-                                class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                stroke-width="1.5">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5">
-                                </path>
-                            </svg><span>图生图</span></button><button type="button" class="image-tab" data-mode="history"
-                            role="tab" id="tab-history" aria-selected="false" aria-controls="panel-history"><svg
-                                class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                stroke-width="1.5">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg><span>记录1</span></button>
+                    <div class="image-tabs">
+                        <div class="image-tab-list" role="tablist" aria-label="Image experience modes">
+                            <button type="button" class="image-tab image-tab-active" data-mode="text" role="tab"
+                                id="tab-text" aria-selected="true" aria-controls="panel-text"><svg class="h-4 w-4"
+                                    fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z">
+                                    </path>
+                                </svg><span>文生图</span></button><button type="button" class="image-tab" data-mode="image"
+                                role="tab" id="tab-image" aria-selected="false" aria-controls="panel-image"><svg
+                                    class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5">
+                                    </path>
+                                </svg><span>图生图</span></button><button type="button" class="image-tab" data-mode="history"
+                                role="tab" id="tab-history" aria-selected="false" aria-controls="panel-history"><svg
+                                    class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg><span>记录1</span></button>
+                        </div>
+                        <div class="image-tab-actions">
+                            <button type="button" class="balance-pill" title="刷新余额">
+                                <span class="balance-dot"></span>
+                                <span class="balance-label">余额</span>
+                                <span class="balance-value">--</span>
+                            </button>
+                            <button type="button" class="theme-toggle" title="切换深色和浅色" aria-label="切换深色和浅色"
+                                aria-pressed="true">
+                                <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                                    stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.8 6.8 0 0 0 21 12.8z"></path>
+                                </svg>
+                                <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                                    stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="4"></circle>
+                                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+                                </svg>
+                                <span class="theme-toggle-label">深色</span>
+                            </button>
+                        </div>
                     </div>
                     <section id="panel-text" class="image-workbench mode-panel" data-panel="text" role="tabpanel"
                         aria-labelledby="tab-text">
@@ -65,10 +89,7 @@
                             <div class="image-field field-span field-ratio">
                                 <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
                                 <div class="resolution-tier">
-                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
-                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
-                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
-                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="1k">1K</button>
                                 </div>
                                 <div class="ratio-grid">
                                     <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
@@ -78,7 +99,7 @@
                                     <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
                                     <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
                                 </div>
-                                <p class="input-hint">分辨率档位会影响生成质量和费用，「自动」由模型自行决定。</p>
+                                <p class="input-hint">当前固定使用 1K 分辨率档位。</p>
                             </div>
                             <div class="image-field field-span field-prompt">
                                 <div class="image-row-label"><label class="input-label mb-0">张数</label><span
@@ -206,10 +227,7 @@
                             <div class="image-field field-span field-ratio">
                                 <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
                                 <div class="resolution-tier">
-                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
-                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
-                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
-                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="1k">1K</button>
                                 </div>
                                 <div class="ratio-grid">
                                     <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
@@ -219,7 +237,7 @@
                                     <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
                                     <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
                                 </div>
-                                <p class="input-hint">分辨率档位会影响生成质量和费用，「自动」由模型自行决定。</p>
+                                <p class="input-hint">当前固定使用 1K 分辨率档位。</p>
                             </div>
                             <div class="image-field field-span field-prompt">
                                 <div class="image-row-label"><label class="input-label mb-0">张数</label><span
@@ -320,6 +338,6 @@
             </section>
         </main>
     </div>
-    <script src="main.js?v=20260617-1659" defer></script>
+    <script src="main.js?v=20260617-2355" defer></script>
 </body>
 </html>

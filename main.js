@@ -35,10 +35,42 @@
 
   (function initDarkMode() {
     const root = document.documentElement;
+    const STORAGE_KEY = 'sub2api_image_generator_theme';
 
-    function applyTheme(isDark) {
+    function applyTheme(isDark, isManual) {
       root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      root.dataset.themeSource = isManual ? 'manual' : 'auto';
+      updateThemeToggle(isDark);
       console.log('[深色模式]', isDark ? '深色' : '浅色');
+    }
+
+    function getManualTheme() {
+      try {
+        const value = window.localStorage.getItem(STORAGE_KEY);
+        return value === 'dark' || value === 'light' ? value : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function setManualTheme(theme) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, theme);
+      } catch (e) {
+        console.log('[深色模式] 无法保存主题选择:', e.message);
+      }
+    }
+
+    function updateThemeToggle(isDark) {
+      const button = $('.theme-toggle');
+      if (!button) return;
+      button.classList.toggle('theme-toggle-dark', isDark);
+      button.classList.toggle('theme-toggle-light', !isDark);
+      button.setAttribute('aria-pressed', String(isDark));
+      button.setAttribute('title', isDark ? '切换到浅色' : '切换到深色');
+      button.setAttribute('aria-label', isDark ? '切换到浅色' : '切换到深色');
+      const label = $('.theme-toggle-label', button);
+      if (label) label.textContent = isDark ? '深色' : '浅色';
     }
 
     function getSystemDark() {
@@ -72,16 +104,31 @@
       return null;
     }
 
-    let currentDark = false;
+    let currentDark = null;
+    let currentManual = null;
 
     function syncTheme() {
-      const parentDark = getParentDark();
-      const isDark = parentDark !== null ? parentDark : getSystemDark();
-      if (isDark !== currentDark) {
+      const manualTheme = getManualTheme();
+      const isManual = manualTheme !== null;
+      const parentDark = isManual ? null : getParentDark();
+      const isDark = isManual
+        ? manualTheme === 'dark'
+        : (parentDark !== null ? parentDark : getSystemDark());
+      if (isDark !== currentDark || isManual !== currentManual) {
         currentDark = isDark;
-        applyTheme(isDark);
+        currentManual = isManual;
+        applyTheme(isDark, isManual);
       }
     }
+
+    document.addEventListener('click', function(event) {
+      const button = event.target.closest('.theme-toggle');
+      if (!button) return;
+      const nextDark = root.getAttribute('data-theme') !== 'dark';
+      setManualTheme(nextDark ? 'dark' : 'light');
+      currentDark = null;
+      syncTheme();
+    });
 
     syncTheme();
 
@@ -105,7 +152,7 @@
       if (window.matchMedia) {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         const handler = function() {
-          if (getParentDark() === null) {
+          if (getManualTheme() === null && getParentDark() === null) {
             syncTheme();
           }
         };
@@ -142,6 +189,109 @@
     }
     return resp.json();
   }
+
+  function unwrapAPIData(resp) {
+    if (resp && typeof resp === 'object' && 'code' in resp && 'data' in resp) return resp.data;
+    return resp;
+  }
+
+  function findNumericField(value, keys) {
+    if (!value || typeof value !== 'object') return null;
+    for (const key of keys) {
+      if (value[key] !== undefined && value[key] !== null && Number.isFinite(Number(value[key]))) {
+        return Number(value[key]);
+      }
+    }
+    for (const child of Object.values(value)) {
+      if (child && typeof child === 'object') {
+        const found = findNumericField(child, keys);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  }
+
+  const balanceState = {
+    value: null,
+    source: 'unknown',
+    loading: false
+  };
+
+  function formatMoney(value) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+    return '$' + Number(value).toFixed(2);
+  }
+
+  function renderBalance() {
+    const pill = $('.balance-pill');
+    if (!pill) return;
+    const valueEl = $('.balance-value', pill);
+    const labelEl = $('.balance-label', pill);
+    if (valueEl) valueEl.textContent = balanceState.loading ? '刷新中' : formatMoney(balanceState.value);
+    if (labelEl) labelEl.textContent = balanceState.source === 'estimate' ? '估算余额' : '余额';
+    pill.classList.toggle('balance-loading', balanceState.loading);
+    pill.classList.toggle('balance-estimated', balanceState.source === 'estimate');
+  }
+
+  async function refreshBalance() {
+    if (!iframeState.token || !iframeState.srcHost || balanceState.loading) return;
+    balanceState.loading = true;
+    renderBalance();
+    try {
+      const profileResp = await callSub2API('/api/v1/user/profile');
+      const profile = unwrapAPIData(profileResp);
+      const balance = findNumericField(profile, ['balance', 'wallet_balance', 'remaining_balance']);
+      if (balance !== null) {
+        balanceState.value = balance;
+        balanceState.source = 'api';
+      }
+    } catch (e) {
+      console.warn('[余额] 刷新失败:', e.message);
+    } finally {
+      balanceState.loading = false;
+      renderBalance();
+    }
+  }
+
+  function notifyParentBalanceChanged(cost, successCount) {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'sub2api:image-generator:balance-changed',
+          cost,
+          successCount,
+          balance: balanceState.value,
+          userId: iframeState.userId || ''
+        }, '*');
+      }
+    } catch (e) {
+      console.warn('[余额] 通知父页面失败:', e.message);
+    }
+  }
+
+  function deductDisplayedBalance(cost, successCount) {
+    const safeCost = Math.max(0, Number(cost) || 0);
+    if (safeCost > 0) {
+      if (Number.isFinite(Number(balanceState.value))) {
+        balanceState.value = Math.max(0, Number(balanceState.value) - safeCost);
+      }
+      if (balanceState.source === 'unknown') balanceState.source = 'estimate';
+      renderBalance();
+    }
+    notifyParentBalanceChanged(safeCost, successCount);
+    setTimeout(refreshBalance, 900);
+  }
+
+  (() => {
+    const pill = $('.balance-pill');
+    if (!pill) return;
+    pill.addEventListener('click', () => {
+      refreshBalance();
+      notifyParentBalanceChanged(0, 0);
+    });
+    renderBalance();
+    refreshBalance();
+  })();
 
   function showToast(message, type = 'info') {
     let container = $('#toast-container');
@@ -529,9 +679,7 @@
       { value: 'direct-gpt4o', label: '直连官方 · GPT-4o' }
     ],
       'model': [
-        { value: 'gpt-image-2', label: 'gpt-image-2' },
-        { value: 'gpt-image-1.5', label: 'gpt-image-1.5' },
-        { value: 'gpt-image-1', label: 'gpt-image-1' }
+        { value: 'gpt-image-2', label: 'gpt-image-2' }
       ],
       'quality': [
         { value: 'auto', label: '自动' },
@@ -860,9 +1008,14 @@
     updateCount();
   })();
 
-  function updateCost() {
-    const PRICE_PER_IMAGE = 0.06;
+  const PRICE_PER_IMAGE = 0.06;
 
+  function formatImageCost(count) {
+    const safeCount = Math.max(0, Number(count) || 0);
+    return '$' + (PRICE_PER_IMAGE * safeCount).toFixed(2);
+  }
+
+  function updateCost() {
     $$('.mode-panel').forEach(panel => {
       const costEl = $('.cost-value', panel);
       if (!costEl) return;
@@ -872,8 +1025,7 @@
       const range = $('.image-range', panel);
       if (range) count = parseInt(range.value) || 1;
 
-      const total = (PRICE_PER_IMAGE * count).toFixed(2);
-      costEl.textContent = '$' + total;
+      costEl.textContent = formatImageCost(count);
     });
   }
 
@@ -913,172 +1065,11 @@
     return '';
   }
 
-  function walkForImageCall(value) {
-    if (!value) return null;
-    if (Array.isArray(value)) {
-      for (const child of value) {
-        const found = walkForImageCall(child);
-        if (found) return found;
-      }
-      return null;
-    }
-    if (typeof value === 'object') {
-      if (value.type === 'image_generation_call' && value.result) return value;
-      for (const child of Object.values(value)) {
-        const found = walkForImageCall(child);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
-  function extractImageResult(raw) {
-    let partialB64 = '';
-    let partialPrompt = '';
-    for (const line of raw.split(/\r?\n/)) {
-      if (!line.startsWith('data: ')) continue;
-      const payload = line.slice(6).trim();
-      if (!payload || payload === '[DONE]') continue;
-      let event;
-      try { event = JSON.parse(payload); } catch { continue; }
-      if (event.type === 'response.image_generation_call.partial_image' && event.partial_image_b64) {
-        partialB64 = event.partial_image_b64;
-        partialPrompt = event.revised_prompt || partialPrompt;
-        continue;
-      }
-      if (event.type === 'response.output_item.done' && event.item?.type === 'image_generation_call') {
-        if (event.item.result) {
-          return { imageB64: event.item.result, revisedPrompt: event.item.revised_prompt || '' };
-        }
-        if (partialB64) {
-          return { imageB64: partialB64, revisedPrompt: partialPrompt };
-        }
-      }
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      const found = walkForImageCall(parsed);
-      if (found?.result) {
-        return { imageB64: found.result, revisedPrompt: found.revised_prompt || '' };
-      }
-    } catch {}
-    if (partialB64) {
-      return { imageB64: partialB64, revisedPrompt: partialPrompt };
-    }
-    return null;
-  }
-
-  async function requestResponsesAPI(baseURL, apiKey, requestBody, onProgress) {
-    let lastError;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const fullURL = baseURL + '/v1/responses';
-        const maskedKey = apiKey ? (apiKey.slice(0, 8) + '****' + apiKey.slice(-4)) : 'null';
-        console.groupCollapsed('[生图调试] 第 ' + attempt + ' 次请求');
-        console.log('请求地址:', fullURL);
-        console.log('API Key:', maskedKey);
-        console.log('请求体:', JSON.stringify(requestBody, null, 2));
-        console.groupEnd();
-
-        if (attempt > 1 && onProgress) {
-          onProgress('第 ' + attempt + ' 次重试中...');
-        }
-        const response = await fetch(fullURL, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + apiKey,
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream, application/json'
-          },
-          body: JSON.stringify(requestBody)
-        });
-        console.log('[生图调试] 响应状态:', response.status, response.statusText);
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error('[生图调试] 错误响应原文:', errText);
-          let msg = 'HTTP ' + response.status;
-          try {
-            const errJson = JSON.parse(errText);
-            msg = errJson.error?.message || errJson.message || msg;
-            console.error('[生图调试] 错误JSON:', errJson);
-          } catch {}
-          const err = new Error(msg);
-          err.httpStatus = response.status;
-          throw err;
-        }
-        if (!response.body) {
-          const raw = await response.text();
-          console.log('[生图调试] 非流式响应原文(前2000字符):', raw.slice(0, 2000));
-          const result = extractImageResult(raw);
-          console.log('[生图调试] 提取结果:', result ? '成功(有imageB64)' : '失败(null)');
-          return result;
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let raw = '';
-        let pending = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          raw += chunk;
-          pending += chunk;
-          let newline = pending.indexOf('\n');
-          while (newline >= 0) {
-            const line = pending.slice(0, newline).replace(/\r$/, '');
-            pending = pending.slice(newline + 1);
-            if (line.startsWith('data: ')) {
-              const payload = line.slice(6).trim();
-              if (payload && payload !== '[DONE]') {
-                try {
-                  const evt = JSON.parse(payload);
-                  if (evt.type) {
-                    console.log('[生图调试] SSE事件:', evt.type, evt.error ? '| 错误:' + JSON.stringify(evt.error) : '');
-                    if (onProgress) {
-                      const MAP = {
-                        'response.created': '请求已创建',
-                        'response.in_progress': '模型处理中',
-                        'response.image_generation_call.in_progress': '图片工具已启动',
-                        'response.image_generation_call.generating': '图片正在生成',
-                        'response.image_generation_call.partial_image': '已收到图片数据片段',
-                        'response.output_item.done': '图片生成完成',
-                        'response.completed': '接口已完成'
-                      };
-                      const desc = MAP[evt.type];
-                      if (desc) onProgress(desc);
-                    }
-                  }
-                } catch {}
-              }
-            }
-            newline = pending.indexOf('\n');
-          }
-        }
-        console.log('[生图调试] SSE流总长度:', raw.length, '字符');
-        console.log('[生图调试] SSE流原文(前3000字符):', raw.slice(0, 3000));
-        const result = extractImageResult(raw);
-        console.log('[生图调试] 提取结果:', result ? '成功(有imageB64)' : '失败(null)');
-        return result;
-      } catch (err) {
-        lastError = err;
-        console.error('[生图调试] 第 ' + attempt + ' 次请求失败:', err.message, 'httpStatus:', err.httpStatus || 'N/A');
-        if (err.httpStatus === 503) throw err;
-        if (attempt < MAX_ATTEMPTS && isRetryableError(err)) {
-          if (onProgress) onProgress('服务暂时不可用，' + (RETRY_BACKOFF_MS / 1000) + '秒后重试 (' + attempt + '/' + MAX_ATTEMPTS + ')');
-          await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
-          continue;
-        }
-        throw err;
-      }
-    }
-    throw lastError;
-  }
-
   async function requestImagesAPI(baseURL, apiKey, requestBody, onProgress) {
     const fullURL = baseURL + '/v1/images/generations';
     const maskedKey = apiKey ? (apiKey.slice(0, 8) + '****' + apiKey.slice(-4)) : 'null';
-    console.log('[生图调试] 回退到 Images API:', fullURL);
-    if (onProgress) onProgress('正在通过备用接口生成...');
+    console.log('[生图调试] Images API:', fullURL, maskedKey);
+    if (onProgress) onProgress('正在生成图片...');
     const response = await fetch(fullURL, {
       method: 'POST',
       headers: {
@@ -1108,8 +1099,8 @@
 
   async function requestImagesEditAPI(baseURL, apiKey, formData, onProgress) {
     const fullURL = baseURL + '/v1/images/edits';
-    console.log('[生图调试] 回退到 Images Edit API:', fullURL);
-    if (onProgress) onProgress('正在通过备用接口生成...');
+    console.log('[生图调试] Images Edit API:', fullURL);
+    if (onProgress) onProgress('正在生成图片...');
     const response = await fetch(fullURL, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + apiKey },
@@ -1211,7 +1202,7 @@
     const ratio = activeCard?.querySelector('.ratio-label')?.textContent || '自动生成';
     
     const tierBtn = panel.querySelector('.tier-btn-active');
-    const resolutionTier = tierBtn?.dataset?.tier || 'auto';
+    const resolutionTier = tierBtn?.dataset?.tier || '1k';
     
     console.log('[生图调试] ===== 参数解析 =====');
     console.log('[生图调试] 画面比例:', ratio);
@@ -1248,7 +1239,6 @@
     console.log('[生图调试] tool.model:', tool.model);
     console.log('[生图调试] tool.quality:', tool.quality);
     console.log('[生图调试] enhancedPrompt:', enhancedPrompt);
-    
     const imagesBody = {
       model: imageModel || 'gpt-image-2',
       prompt: enhancedPrompt,
@@ -1407,24 +1397,26 @@
             : '并行生成 ' + successfulResults.length + '/' + count + ' 张，耗时 ' + elapsed + ' 秒' + failNote;
 
           let imagesHTML = '';
-          successfulResults.forEach((result, idx) => {
-            const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
+          const renderedResults = successfulResults.map(result => ({
+            ...result,
+            dataURL: 'data:' + mimeType + ';base64,' + result.imageB64
+          }));
+          renderedResults.forEach((result, idx) => {
             const badge = String(idx + 1).padStart(2, '0');
-            imagesHTML += '<div class="result-image-wrap" data-index="' + idx + '"><img src="' + dataURL + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image" data-action="preview"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button><button type="button" class="result-action-btn" data-action="preview" data-index="' + idx + '" title="放大预览"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/></svg></button></div></div>';
+            imagesHTML += '<div class="result-image-wrap" data-index="' + idx + '"><img src="' + result.dataURL + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image" data-action="preview"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div></div>';
           });
 
           canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="gen-multi-preview">' + imagesHTML + '</div></div>';
 
-          const previewImages = canvas.querySelectorAll('.result-image[data-action="preview"], .result-action-btn[data-action="preview"]');
+          const previewImages = canvas.querySelectorAll('.result-image[data-action="preview"]');
           previewImages.forEach(el => {
             el.addEventListener('click', (e) => {
               e.stopPropagation();
               const wrap = el.closest('.result-image-wrap');
               const idx = parseInt(wrap?.dataset?.index ?? el.dataset?.index ?? '0');
-              const result = successfulResults[idx];
+              const result = renderedResults[idx];
               if (result) {
-                const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
-                showImageLightbox(dataURL);
+                showImageLightbox(result.dataURL);
               }
             });
           });
@@ -1433,11 +1425,10 @@
             downloadBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               const idx = parseInt(downloadBtn.dataset.index);
-              const result = successfulResults[idx];
+              const result = renderedResults[idx];
               if (result) {
-                const dataURL = 'data:' + mimeType + ';base64,' + result.imageB64;
                 const a = document.createElement('a');
-                a.href = dataURL;
+                a.href = result.dataURL;
                 a.download = 'generated-image-' + Date.now() + '-' + (idx + 1) + '.' + outputFormat;
                 document.body.appendChild(a);
                 a.click();
@@ -1447,20 +1438,26 @@
             });
           });
 
-          const baseTimestamp = Date.now();
-          successfulResults.forEach((result, idx) => {
-            saveToHistory({
-              id: baseTimestamp + idx,
-              mode: mode === 'image' ? '图生图' : '文生图',
-              prompt: prompt.substring(0, 60),
-              count: 1,
-              ratio: ratio,
-              format: outputFormat.toUpperCase(),
-              cost: panel.querySelector('.cost-value')?.textContent || '$0.00',
-              timestamp: now.toISOString(),
-              thumbnail: 'data:' + mimeType + ';base64,' + result.imageB64
-            });
+          const historyImages = await Promise.all(renderedResults.map(result => createHistoryThumbnail(result.dataURL)));
+          saveToHistory({
+            id: Date.now(),
+            mode: mode === 'image' ? '图生图' : '文生图',
+            prompt: prompt,
+            count: successfulResults.length,
+            requestedCount: count,
+            failedCount: failedIndices.length,
+            ratio: ratio,
+            resolutionTier: resolutionTier,
+            format: outputFormat.toUpperCase(),
+            model: model,
+            quality: quality,
+            cost: formatImageCost(successfulResults.length),
+            timestamp: now.toISOString(),
+            thumbnail: historyImages[0] || '',
+            images: historyImages.filter(Boolean)
           });
+
+          deductDisplayedBalance(successfulResults.length * PRICE_PER_IMAGE, successfulResults.length);
 
         } catch (err) {
           if (timerInterval) clearInterval(timerInterval);
@@ -1483,7 +1480,11 @@
     });
   })();
 
-  function showImageLightbox(imageSrc) {
+  function showImageLightbox(imageSrc, imageList, startIndex = 0) {
+    const images = (Array.isArray(imageList) && imageList.length ? imageList : [imageSrc]).filter(Boolean);
+    if (!images.length) return;
+    let currentIndex = Math.min(Math.max(parseInt(startIndex) || 0, 0), images.length - 1);
+
     let overlay = document.getElementById('image-lightbox');
     if (overlay) {
       overlay.remove();
@@ -1492,48 +1493,127 @@
     overlay = document.createElement('div');
     overlay.id = 'image-lightbox';
     overlay.className = 'lightbox-overlay';
-    overlay.innerHTML = '<div class="lightbox-backdrop"></div><div class="lightbox-container"><img src="' + imageSrc + '" alt="图片预览" class="lightbox-image"><button type="button" class="lightbox-close" title="关闭">&times;</button><button type="button" class="lightbox-download" title="下载"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button></div>';
+    overlay.innerHTML = '<div class="lightbox-backdrop"></div><div class="lightbox-container"><img src="" alt="图片预览" class="lightbox-image"><button type="button" class="lightbox-close" title="关闭">&times;</button><button type="button" class="lightbox-download" title="下载"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button>' + (images.length > 1 ? '<button type="button" class="lightbox-nav lightbox-prev" title="上一张">&lsaquo;</button><button type="button" class="lightbox-nav lightbox-next" title="下一张">&rsaquo;</button><div class="lightbox-count"></div>' : '') + '</div>';
 
     document.body.appendChild(overlay);
+
+    const imageEl = overlay.querySelector('.lightbox-image');
+    const countEl = overlay.querySelector('.lightbox-count');
+
+    function setImage(index) {
+      currentIndex = (index + images.length) % images.length;
+      imageEl.src = images[currentIndex];
+      if (countEl) countEl.textContent = (currentIndex + 1) + ' / ' + images.length;
+    }
+
+    function getImageExtension(src) {
+      const match = /^data:image\/([^;]+)/.exec(src || '');
+      if (!match) return 'png';
+      return match[1] === 'jpeg' ? 'jpg' : match[1];
+    }
 
     requestAnimationFrame(() => {
       overlay.classList.add('lightbox-active');
     });
 
-    const closeLightbox = () => {
+    function closeLightbox() {
       overlay.classList.remove('lightbox-active');
+      document.removeEventListener('keydown', handleKey);
       setTimeout(() => {
         overlay.remove();
       }, 300);
-    };
+    }
+
+    function handleKey(e) {
+      if (e.key === 'Escape') {
+        closeLightbox();
+      } else if (images.length > 1 && e.key === 'ArrowLeft') {
+        setImage(currentIndex - 1);
+      } else if (images.length > 1 && e.key === 'ArrowRight') {
+        setImage(currentIndex + 1);
+      }
+    }
 
     overlay.querySelector('.lightbox-backdrop').addEventListener('click', closeLightbox);
     overlay.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+    overlay.querySelector('.lightbox-prev')?.addEventListener('click', () => setImage(currentIndex - 1));
+    overlay.querySelector('.lightbox-next')?.addEventListener('click', () => setImage(currentIndex + 1));
 
     overlay.querySelector('.lightbox-download').addEventListener('click', () => {
       const a = document.createElement('a');
-      a.href = imageSrc;
-      a.download = 'image-' + Date.now() + '.png';
+      a.href = images[currentIndex];
+      a.download = 'image-' + Date.now() + '-' + (currentIndex + 1) + '.' + getImageExtension(images[currentIndex]);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       showToast('开始下载图片', 'success');
     });
 
-    const handleEscape = (e) => {
-      if (e.key === 'Escape') {
-        closeLightbox();
-        document.removeEventListener('keydown', handleEscape);
+    setImage(currentIndex);
+    document.addEventListener('keydown', handleKey);
+  }
+
+  function createHistoryThumbnail(imageSrc) {
+    return new Promise(resolve => {
+      if (!imageSrc) {
+        resolve('');
+        return;
       }
-    };
-    document.addEventListener('keydown', handleEscape);
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const maxSize = 320;
+          const scale = Math.min(maxSize / img.naturalWidth, maxSize / img.naturalHeight, 1);
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/webp', 0.72));
+        } catch (e) {
+          console.warn('[历史记录] 缩略图压缩失败，使用原图:', e.message);
+          resolve(imageSrc);
+        }
+      };
+      img.onerror = () => resolve(imageSrc);
+      img.src = imageSrc;
+    });
   }
 
   const HISTORY_KEY = 'image_gen_history';
+  const HISTORY_LIMIT = 30;
+
+  function getHistoryImages(entry) {
+    if (!entry) return [];
+    if (Array.isArray(entry.images) && entry.images.length) return entry.images.filter(Boolean);
+    return entry.thumbnail ? [entry.thumbnail] : [];
+  }
+
+  function normalizeHistoryEntry(entry) {
+    const images = getHistoryImages(entry);
+    return {
+      ...entry,
+      count: Number(entry.count) || images.length || 1,
+      images,
+      thumbnail: images[0] || entry.thumbnail || ''
+    };
+  }
+
+  function escapeHTML(value) {
+    return String(value || '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char]));
+  }
 
   function getHistory() {
     try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(history) ? history.map(normalizeHistoryEntry) : [];
     } catch (e) {
       return [];
     }
@@ -1541,7 +1621,8 @@
 
   function saveToHistory(entry) {
     const history = getHistory();
-    history.unshift(entry);
+    history.unshift(normalizeHistoryEntry(entry));
+    if (history.length > HISTORY_LIMIT) history.length = HISTORY_LIMIT;
 
     let saved = false;
 
@@ -1592,20 +1673,27 @@
       const timeLabel = isToday
         ? '今天 ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0')
         : (date.getMonth() + 1) + '月' + date.getDate() + '日 ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
-      const thumbStyle = entry.thumbnail
-        ? 'background-image:url(\'' + entry.thumbnail + '\');background-size:cover;background-position:center;cursor:pointer'
+      const images = getHistoryImages(entry);
+      const thumbnail = images[0] || '';
+      const count = Number(entry.count) || images.length || 1;
+      const failText = entry.failedCount ? '，失败 ' + entry.failedCount + ' 张' : '';
+      const metaText = [timeLabel, entry.ratio, entry.resolutionTier ? String(entry.resolutionTier).toUpperCase() : '', entry.format].filter(Boolean).join(' · ');
+      const thumbStyle = thumbnail
+        ? 'background-image:url(\'' + thumbnail + '\');background-size:cover;background-position:center;cursor:pointer'
         : '';
 
-      return '<article class="history-card" data-id="' + entry.id + '" data-thumbnail="' + (entry.thumbnail || '') + '"><div class="history-thumb" style="' + thumbStyle + '"></div><div class="history-info"><h3>' + (entry.prompt || '未命名') + '</h3><p>' + entry.mode + ' · ' + entry.count + ' 张 · ' + entry.cost + '</p><span>' + timeLabel + ' · ' + entry.ratio + ' · ' + entry.format + '</span></div><button type="button" class="history-delete" data-id="' + entry.id + '" title="删除记录">&times;</button></article>';
+      return '<article class="history-card" data-id="' + escapeHTML(entry.id) + '"><div class="history-thumb" style="' + thumbStyle + '"></div><div class="history-info"><h3>' + escapeHTML(entry.prompt || '未命名') + '</h3><p>' + escapeHTML(entry.mode) + ' · ' + count + ' 张' + failText + ' · ' + escapeHTML(entry.cost) + '</p><span>' + escapeHTML(metaText) + '</span></div><button type="button" class="history-delete" data-id="' + escapeHTML(entry.id) + '" title="删除记录">&times;</button></article>';
     }).join('');
 
     $$('.history-thumb', list).forEach(thumb => {
       thumb.addEventListener('click', e => {
         e.stopPropagation();
         const card = thumb.closest('.history-card');
-        const thumbnail = card?.dataset?.thumbnail;
-        if (thumbnail) {
-          showImageLightbox(thumbnail);
+        const id = card?.dataset?.id;
+        const entry = history.find(item => String(item.id) === String(id));
+        const images = getHistoryImages(entry);
+        if (images.length) {
+          showImageLightbox(images[0], images, 0);
         }
       });
     });
@@ -1613,8 +1701,8 @@
     $$('.history-delete', list).forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const id = parseInt(btn.dataset.id);
-        const updated = getHistory().filter(h => h.id !== id);
+        const id = btn.dataset.id;
+        const updated = getHistory().filter(h => String(h.id) !== String(id));
         try {
           localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
         } catch (err) { /* ignore */ }
