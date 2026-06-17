@@ -145,9 +145,9 @@ h3 {
 .image-tabs {
   display: flex;
   flex: 0 0 auto;
-  gap: 4px;
+  gap: 10px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   border-bottom: 1px solid rgba(226, 232, 240, 0.68);
   padding: 0 clamp(12px, 1.4vw, 18px);
   background: rgba(255, 255, 255, 0.58);
@@ -185,7 +185,8 @@ h3 {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-left: 2px;
 }
 
 .balance-pill {
@@ -193,7 +194,7 @@ h3 {
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
-  min-width: 128px;
+  min-width: 112px;
   justify-content: center;
   border: 1px solid rgba(20, 184, 166, 0.22);
   border-radius: 999px;
@@ -1216,19 +1217,21 @@ h3 {
 
   .image-tabs {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: 8px;
     overflow-x: visible;
     padding: 8px 12px;
   }
 
   .image-tab-list {
+    width: 100%;
     overflow-x: auto;
     padding-bottom: 2px;
   }
 
   .image-tab-actions {
-    align-self: flex-end;
+    align-self: flex-start;
+    margin-left: 0;
   }
 
   .image-workbench {
