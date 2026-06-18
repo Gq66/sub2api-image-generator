@@ -1258,6 +1258,67 @@
     return '';
   }
 
+  function logImageEditResponseShape(data) {
+    const first = data?.data?.[0] || {};
+    console.warn('[生图调试] Images Edit API 未找到 b64_json，响应结构:', {
+      topKeys: data && typeof data === 'object' ? Object.keys(data) : [],
+      dataLength: Array.isArray(data?.data) ? data.data.length : null,
+      firstKeys: first && typeof first === 'object' ? Object.keys(first) : [],
+      firstType: first?.type || '',
+      hasUrl: !!first?.url,
+      hasB64: !!first?.b64_json,
+      errorMessage: data?.error?.message || ''
+    });
+  }
+
+  async function fetchWithTimeout(url, options, timeoutMs, label) {
+    if (typeof AbortController === 'undefined') {
+      return fetch(url, options);
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(label + ' 请求超时，请检查后台是否接收到请求或图片是否过大');
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function imageUrlToBase64(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('图片 URL 下载失败: HTTP ' + response.status);
+    }
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataURL = String(reader.result || '');
+        const commaIndex = dataURL.indexOf(',');
+        resolve(commaIndex >= 0 ? dataURL.slice(commaIndex + 1) : dataURL);
+      };
+      reader.onerror = () => reject(new Error('图片 URL 转换失败'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function parseImageEditAPIResult(data) {
+    const first = data?.data?.[0];
+    if (first?.b64_json) {
+      return { imageB64: first.b64_json, revisedPrompt: first.revised_prompt || '' };
+    }
+    if (first?.url) {
+      return { imageB64: await imageUrlToBase64(first.url), revisedPrompt: first.revised_prompt || '' };
+    }
+    logImageEditResponseShape(data);
+    throw new Error('Images Edit API 未返回可用图片数据');
+  }
+
   async function requestImagesAPI(baseURL, apiKey, requestBody, onProgress) {
     const fullURL = baseURL + '/v1/images/generations';
     const maskedKey = apiKey ? (apiKey.slice(0, 8) + '****' + apiKey.slice(-4)) : 'null';
@@ -1294,11 +1355,11 @@
     const fullURL = baseURL + '/v1/images/edits';
     console.log('[生图调试] Images Edit API:', fullURL);
     if (onProgress) onProgress('正在生成图片...');
-    const response = await fetch(fullURL, {
+    const response = await fetchWithTimeout(fullURL, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + apiKey },
       body: formData
-    });
+    }, 600000, 'Images Edit API');
     console.log('[生图调试] Images Edit API 响应状态:', response.status);
     if (!response.ok) {
       const errText = await response.text();
@@ -1310,11 +1371,7 @@
       throw err;
     }
     const data = await response.json();
-    const first = data.data?.[0];
-    if (!first?.b64_json) {
-      throw new Error('Images Edit API 未返回可用图片数据');
-    }
-    return { imageB64: first.b64_json, revisedPrompt: first.revised_prompt || '' };
+    return parseImageEditAPIResult(data);
   }
 
   async function generateWithConcurrency(tasks, maxConcurrent, onProgress) {
@@ -1463,12 +1520,14 @@
     console.log('[生图调试] 图生图应用SizeIntent后tool:', { size: tool.size });
     
     const form = new FormData();
+    let totalBytes = 0;
     for (let i = 0; i < sourceImages.length; i++) {
       const dataURL = sourceImages[i];
       const base64Part = dataURL.slice(dataURL.indexOf(',') + 1);
       const mimeType = dataURL.slice(5, dataURL.indexOf(';')) || 'image/png';
       const ext = mimeType.split('/')[1] || 'png';
       const binary = atob(base64Part);
+      totalBytes += binary.length;
       const bytes = new Uint8Array(binary.length);
       for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
       const blob = new Blob([bytes], { type: mimeType });
@@ -1481,6 +1540,10 @@
     form.append('quality', quality || 'auto');
     form.append('output_format', outputFormat || 'png');
     form.append('response_format', 'b64_json');
+    console.log('[生图调试] Images Edit API 上传图片:', {
+      count: sourceImages.length,
+      totalMB: (totalBytes / 1024 / 1024).toFixed(2)
+    });
     console.log('[生图调试] 直接使用 Images Edit API，跳过 Responses API');
     return requestImagesEditAPI(baseURL, apiKey, form, onProgress);
   }
@@ -1530,7 +1593,10 @@
         const startTime = Date.now();
         let timerInterval = null;
 
-        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">正在并行生成 ' + count + ' 张图片，请稍候...</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text">准备中...</p></div>';
+        const loadingText = mode === 'image'
+          ? '正在生成 ' + count + ' 张图片，请稍候...'
+          : '正在并行生成 ' + count + ' 张图片，请稍候...';
+        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">' + loadingText + '</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text">准备中...</p></div>';
 
         const timerEl = canvas.querySelector('.gen-timer');
         const progressEl = canvas.querySelector('.gen-progress-text');
@@ -1560,7 +1626,8 @@
             });
           }
 
-          const results = await generateWithConcurrency(tasks, MAX_CONCURRENT, onProgress);
+          const concurrency = mode === 'image' ? 1 : MAX_CONCURRENT;
+          const results = await generateWithConcurrency(tasks, concurrency, onProgress);
 
           if (timerInterval) clearInterval(timerInterval);
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
