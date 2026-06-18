@@ -455,7 +455,7 @@
         callback();
       };
       const onEnd = event => {
-        if (event.target === body && event.propertyName === 'height') cleanup();
+        if (event.target === body && event.propertyName === 'max-height') cleanup();
       };
       body.addEventListener('transitionend', onEnd);
       window.setTimeout(cleanup, duration + 60);
@@ -466,24 +466,24 @@
       setExpanded(details, true);
       body.style.paddingBottom = '0px';
       if (motionQuery.matches) {
-        body.style.height = 'auto';
+        body.style.maxHeight = 'none';
         body.style.opacity = '1';
         body.style.paddingBottom = '';
         return;
       }
-      body.style.height = '0px';
+      body.style.maxHeight = '0px';
       body.style.opacity = '0';
       body.style.transform = 'translateY(-6px)';
       body.dataset.animating = 'true';
       requestAnimationFrame(() => {
         body.style.paddingBottom = '';
-        body.style.height = body.scrollHeight + 'px';
+        body.style.maxHeight = body.scrollHeight + 'px';
         body.style.opacity = '1';
         body.style.transform = 'translateY(0)';
       });
       finishAnimation(body, () => {
         body.dataset.animating = 'false';
-        body.style.height = 'auto';
+        body.style.maxHeight = 'none';
         body.style.paddingBottom = '';
         body.style.transform = '';
       });
@@ -493,17 +493,17 @@
       setExpanded(details, false);
       body.style.paddingBottom = window.getComputedStyle(body).paddingBottom;
       if (motionQuery.matches) {
-        body.style.height = '0px';
+        body.style.maxHeight = '0px';
         body.style.opacity = '0';
         details.open = false;
         body.style.paddingBottom = '';
         return;
       }
-      body.style.height = body.scrollHeight + 'px';
+      body.style.maxHeight = body.scrollHeight + 'px';
       body.style.opacity = '1';
       body.dataset.animating = 'true';
       requestAnimationFrame(() => {
-        body.style.height = '0px';
+        body.style.maxHeight = '0px';
         body.style.opacity = '0';
         body.style.paddingBottom = '0px';
         body.style.transform = 'translateY(-6px)';
@@ -521,7 +521,7 @@
       const body = details.querySelector('.advanced-body');
       if (!summary || !body) return;
       details.open = false;
-      body.style.height = '0px';
+      body.style.maxHeight = '0px';
       body.style.opacity = '0';
       summary.setAttribute('aria-expanded', 'false');
       summary.addEventListener('click', event => {
@@ -744,7 +744,7 @@
     function closeDropdown() {
       if (openDropdown) {
         openDropdown.classList.remove('select-open');
-        const menu = openDropdown.querySelector('.select-menu');
+        const menu = document.querySelector(`.select-menu[data-owner="${openDropdown.dataset.selectOwner}"]`);
         if (menu) menu.remove();
         openDropdown = null;
       }
@@ -760,10 +760,19 @@
       if (e.key === 'Escape') closeDropdown();
     });
 
+    window.addEventListener('resize', closeDropdown);
+    document.addEventListener('scroll', event => {
+      if (event.target?.closest?.('.select-menu')) return;
+      closeDropdown();
+    }, true);
+
     function createSelect(field, optionsKey) {
       const trigger = field.querySelector('.select-trigger');
       if (!trigger) return;
       const wrapper = trigger.closest('.relative') || trigger.parentElement;
+      if (!wrapper.dataset.selectOwner) {
+        wrapper.dataset.selectOwner = 'select-' + Math.random().toString(36).slice(2);
+      }
       const initialOptions = SELECT_OPTIONS[optionsKey] || [];
       let currentValue = trigger.dataset.value || initialOptions[0]?.value || '';
 
@@ -779,6 +788,7 @@
 
         const menu = document.createElement('div');
         menu.className = 'select-menu';
+        menu.dataset.owner = wrapper.dataset.selectOwner;
         options.forEach(opt => {
           const item = document.createElement('button');
           item.type = 'button';
@@ -795,7 +805,11 @@
         });
 
         wrapper.classList.add('select-open');
-        wrapper.appendChild(menu);
+        document.body.appendChild(menu);
+        const rect = trigger.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 4 + 'px';
+        menu.style.width = rect.width + 'px';
         openDropdown = wrapper;
 
         const firstItem = menu.querySelector('.select-option');
