@@ -547,22 +547,22 @@
       '4k': [4096, 4096]
     },
     '4:3': {
-      '1k': [1536, 1024],
+      '1k': [1365, 1024],
       '2k': [2730, 2048],
       '4k': [5461, 4096]
     },
     '3:4': {
-      '1k': [1024, 1536],
+      '1k': [1024, 1365],
       '2k': [2048, 2730],
       '4k': [4096, 5461]
     },
     '16:9': {
-      '1k': [1536, 1024],
+      '1k': [1536, 864],
       '2k': [2048, 1152],
       '4k': [3840, 2160]
     },
     '9:16': {
-      '1k': [1024, 1536],
+      '1k': [864, 1536],
       '2k': [1152, 2048],
       '4k': [2160, 3840]
     }
@@ -618,9 +618,22 @@
 
   function buildSizeIntent(ratio, resolutionTier) {
     const isAutoRatio = (ratio === '自动生成');
-    
+    const isAutoTier = (resolutionTier === 'auto');
+
+    if (isAutoRatio && isAutoTier) {
+      return {
+        aspect: 'auto',
+        resolution: 'auto',
+        width: null,
+        height: null,
+        size: 'auto',
+        aspectRatio: null,
+        promptEnhancement: ''
+      };
+    }
+
     const aspectKey = isAutoRatio ? '1:1' : ratio.replace(/ 正方形| 横版| 竖版/g, '');
-    const resolutionKey = '1k';
+    const resolutionKey = isAutoTier ? '1k' : resolutionTier.toLowerCase();
     
     const sizeEntry = SIZE_MATRIX[aspectKey]?.[resolutionKey];
     const width = sizeEntry ? sizeEntry[0] : 1024;
@@ -641,19 +654,46 @@
     };
   }
 
-  function getNative1KSize(sizeIntent) {
-    const aspect = sizeIntent?.aspect;
-    if (aspect === '3:4' || aspect === '9:16') return '1024x1536';
-    if (aspect === '4:3' || aspect === '16:9') return '1536x1024';
-    return '1024x1024';
-  }
-
-
   function applySizeIntentToTool(tool, sizeIntent, modelID) {
-    tool.size = getNative1KSize(sizeIntent);
-    console.log('[image-debug] fixed 1K size:', { modelID, requested: sizeIntent?.size, final: tool.size });
+    const capabilities = getGPTModelCapabilities(modelID);
+
+    console.log('[生图调试] ===== 尺寸应用 =====');
+    console.log('[生图调试] 模型ID:', modelID);
+    console.log('[生图调试] 模型能力:', JSON.stringify(capabilities, null, 2));
+    console.log('[生图调试] 期望尺寸:', sizeIntent.size);
+
+    if (sizeIntent.size === 'auto') {
+      tool.size = 'auto';
+      console.log('[生图调试] 结果: 自动模式，使用auto');
+      return tool;
+    }
+
+    if (capabilities.supportedSizes.includes(sizeIntent.size)) {
+      tool.size = sizeIntent.size;
+      console.log('[生图调试] 结果: 模型直接支持，使用', tool.size);
+      return tool;
+    }
+
+    console.log('[生图调试] 模型不直接支持', sizeIntent.size, '，开始降级...');
+
+    const scale = Math.min(
+      capabilities.maxResolution / sizeIntent.width,
+      capabilities.maxResolution / sizeIntent.height,
+      1
+    );
+    const scaledWidth = Math.floor(sizeIntent.width * scale);
+    const scaledHeight = Math.floor(sizeIntent.height * scale);
+
+    const roundTo64 = (n) => Math.round(n / 64) * 64;
+    tool.size = `${roundTo64(scaledWidth)}x${roundTo64(scaledHeight)}`;
+
+    console.log('[生图调试] 缩放比例:', scale.toFixed(4));
+    console.log('[生图调试] 缩放后:', scaledWidth + 'x' + scaledHeight);
+    console.log('[生图调试] 对齐64后:', tool.size);
+    console.log('[生图调试] 最终降级: ' + sizeIntent.size + ' -> ' + tool.size + ' (模型最大' + capabilities.maxResolution + ')');
     return tool;
   }
+
   function enhancePromptWithSizeIntent(prompt, sizeIntent) {
     if (!sizeIntent.promptEnhancement) return prompt;
     
