@@ -708,12 +708,7 @@
 
   console.log('[生图调试] SizeIntent模块已加载');
 
-  const SELECT_OPTIONS = {
-    'api-key': [
-      { value: 'pool-gpt', label: '对接中转 · GPT【主推号池】' },
-      { value: 'pool-claude', label: '对接中转 · Claude【备用号池】' },
-      { value: 'direct-gpt4o', label: '直连官方 · GPT-4o' }
-    ],
+  const SELECT_OPTIONS = {'api-key': [],
       'model': [
         { value: 'gpt-image-2', label: 'gpt-image-2' }
       ],
@@ -736,6 +731,7 @@
     };
 
   const AUTO_IMAGE_KEY_GROUP_NAME = '稳定生图';
+  const AUTO_IMAGE_KEY_LABEL_MARKERS = ['AI生图专用', 'AI 生图专用', '生图专用'];
   let imageKeyCreationPromise = null;
 
   (() => {
@@ -879,11 +875,21 @@
         || normalized.find(g => g.name.toLowerCase().includes('image'));
     }
 
+    function isDedicatedImageAPIKey(apiKey) {
+      const label = cleanText(apiKey?.label || apiKey?.raw?.name || apiKey?.raw?.label || '');
+      return AUTO_IMAGE_KEY_LABEL_MARKERS.some(marker => label.includes(marker));
+    }
+
+    function filterDedicatedImageAPIKeys(apiKeys) {
+      if (!Array.isArray(apiKeys)) return [];
+      return apiKeys.filter(isDedicatedImageAPIKey);
+    }
+
     function findReusableImageAPIKey(apiKeys, groupId) {
       if (!Array.isArray(apiKeys) || groupId === undefined || groupId === null) return null;
       const targetGroupId = Number(groupId);
       if (!Number.isFinite(targetGroupId)) return null;
-      return apiKeys.find(key => Number(key.groupId) === targetGroupId) || null;
+      return apiKeys.find(key => Number(key.groupId) === targetGroupId && isDedicatedImageAPIKey(key)) || null;
     }
 
     async function fetchAvailableGroups() {
@@ -947,19 +953,36 @@
         const items = unwrapAPIList(resp);
         if (!Array.isArray(items) || items.length === 0) return [];
 
-        const apiKeys = items.map(normalizeAPIKeyOption).filter(Boolean);
-        console.log('[生图调试] 获取到API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
+        const allApiKeys = items.map(normalizeAPIKeyOption).filter(Boolean);
+        const apiKeys = filterDedicatedImageAPIKeys(allApiKeys);
+        console.log('[生图调试] 获取到API密钥数量:', allApiKeys.length, 'AI生图专用数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
 
-        if (apiKeys.length > 0) {
-          SELECT_OPTIONS['api-key'] = apiKeys;
-        }
+        SELECT_OPTIONS['api-key'] = apiKeys;
 
         const selected = apiKeys.find(k => k.value === selectedValue) || apiKeys[0];
-        applySelectedAPIKey(selected);
+        if (selected) {
+          applySelectedAPIKey(selected);
+        } else {
+          applySelectedAPIKey({ value: '', label: '请先创建 AI生图专用 Key' });
+        }
         return apiKeys;
       } catch (e) {
-        // fallback to hardcoded options
         return [];
+      }
+    }
+
+    function refreshDedicatedImageKeySelect(panel) {
+      const trigger = panel?.querySelector('.select-trigger');
+      if (!trigger) return;
+      const options = SELECT_OPTIONS['api-key'] || [];
+      const currentValue = trigger.dataset.value || '';
+      const selected = options.find(opt => opt.value === currentValue) || options[0];
+      if (selected) {
+        setSelectValue(trigger, selected);
+      } else {
+        trigger.dataset.value = '';
+        const valueEl = trigger.querySelector('.select-value');
+        if (valueEl) valueEl.textContent = '请先创建 AI生图专用 Key';
       }
     }
 
@@ -996,6 +1019,9 @@
     }
 
     function initPanelSelects(panel) {
+      if (panel && panel.dataset?.panel) {
+        refreshDedicatedImageKeySelect(panel);
+      }
       if (!panel) return;
       const fields = $$('.image-field', panel);
       fields.forEach(field => {
