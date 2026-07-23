@@ -547,24 +547,24 @@
       '4k': [4096, 4096]
     },
     '4:3': {
-      '1k': [1365, 1024],
-      '2k': [2730, 2048],
-      '4k': [5461, 4096]
+      '1k': [1024, 768],
+      '2k': [2048, 1536],
+      '4k': [4096, 3072]
     },
     '3:4': {
-      '1k': [1024, 1365],
-      '2k': [2048, 2730],
-      '4k': [4096, 5461]
+      '1k': [768, 1024],
+      '2k': [1536, 2048],
+      '4k': [3072, 4096]
     },
     '16:9': {
-      '1k': [1536, 864],
+      '1k': [1024, 576],
       '2k': [2048, 1152],
-      '4k': [3840, 2160]
+      '4k': [4096, 2304]
     },
     '9:16': {
-      '1k': [864, 1536],
+      '1k': [576, 1024],
       '2k': [1152, 2048],
-      '4k': [2160, 3840]
+      '4k': [2304, 4096]
     }
   };
 
@@ -616,33 +616,56 @@
     };
   }
 
+  function classifyResolutionTier(width, height) {
+    const longestEdge = Math.max(Number(width), Number(height));
+    if (!Number.isFinite(longestEdge) || longestEdge <= 0) return '2k';
+    if (longestEdge <= 1024) return '1k';
+    if (longestEdge <= 2048) return '2k';
+    return '4k';
+  }
+
+  function getImageResolutionTier(imageSrc) {
+    return new Promise(resolve => {
+      if (!imageSrc) {
+        resolve('2k');
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => resolve(classifyResolutionTier(img.naturalWidth, img.naturalHeight));
+      img.onerror = () => resolve('2k');
+      img.src = imageSrc;
+    });
+  }
+
   function buildSizeIntent(ratio, resolutionTier) {
     const isAutoRatio = (ratio === '自动生成');
-    const isAutoTier = (resolutionTier === 'auto');
+    const normalizedTier = String(resolutionTier || 'auto').toLowerCase();
+    const isAutoTier = normalizedTier === 'auto';
+    const aspectKey = isAutoRatio ? '1:1' : ratio.replace(/ 正方形| 横版| 竖版/g, '');
+    const resolutionKey = SIZE_MATRIX[aspectKey]?.[normalizedTier] ? normalizedTier : '2k';
 
-    if (isAutoRatio && isAutoTier) {
+    if (isAutoTier) {
+      const autoAspect = isAutoRatio ? 'auto' : aspectKey;
       return {
-        aspect: 'auto',
-        resolution: 'auto',
+        aspect: autoAspect,
+        resolution: '2k',
         width: null,
         height: null,
         size: 'auto',
         aspectRatio: null,
-        promptEnhancement: ''
+        promptEnhancement: ASPECT_PROMPT_MAP[autoAspect] || ''
       };
     }
 
-    const aspectKey = isAutoRatio ? '1:1' : ratio.replace(/ 正方形| 横版| 竖版/g, '');
-    const resolutionKey = isAutoTier ? '1k' : resolutionTier.toLowerCase();
-    
     const sizeEntry = SIZE_MATRIX[aspectKey]?.[resolutionKey];
     const width = sizeEntry ? sizeEntry[0] : 1024;
     const height = sizeEntry ? sizeEntry[1] : 1024;
-    
+
     const aspectDesc = ASPECT_PROMPT_MAP[aspectKey] || '';
     const resolutionDesc = RESOLUTION_PROMPT_MAP[resolutionKey] || '';
     const promptEnhancement = [aspectDesc, resolutionDesc].filter(Boolean).join(', ');
-    
+
     return {
       aspect: aspectKey,
       resolution: resolutionKey,
@@ -1478,7 +1501,7 @@
     const ratio = activeCard?.querySelector('.ratio-label')?.textContent || '自动生成';
     
     const tierBtn = panel.querySelector('.tier-btn-active');
-    const resolutionTier = tierBtn?.dataset?.tier || '1k';
+    const resolutionTier = tierBtn?.dataset?.tier || 'auto';
     
     console.log('[生图调试] ===== 参数解析 =====');
     console.log('[生图调试] 画面比例:', ratio);
@@ -1724,7 +1747,10 @@
             });
           });
 
-          const historyImages = await Promise.all(renderedResults.map(result => createHistoryThumbnail(result.dataURL)));
+          const [historyImages, outputResolutionTiers] = await Promise.all([
+            Promise.all(renderedResults.map(result => createHistoryThumbnail(result.dataURL))),
+            Promise.all(renderedResults.map(result => getImageResolutionTier(result.dataURL)))
+          ]);
           saveToHistory({
             id: Date.now(),
             mode: mode === 'image' ? '图生图' : '文生图',
@@ -1733,7 +1759,7 @@
             requestedCount: count,
             failedCount: failedIndices.length,
             ratio: ratio,
-            resolutionTier: resolutionTier,
+            resolutionTier: outputResolutionTiers[0] || '2k',
             format: outputFormat.toUpperCase(),
             model: model,
             quality: quality,

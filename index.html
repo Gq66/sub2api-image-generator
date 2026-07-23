@@ -87,26 +87,6 @@
                                                     d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
                                             </svg></span></button></div>
                             </div>
-                            <div class="image-field field-span field-ratio">
-                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
-                                <div class="resolution-tier">
-                                    <button type="button" class="tier-btn tier-btn-active" data-tier="1k">1K</button>
-                                </div>
-                                <div class="ratio-grid">
-                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
-                                </div>
-                                <p class="input-hint">当前固定使用 1K 分辨率档位。</p>
-                            </div>
-                            <div class="image-field field-span field-prompt">
-                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
-                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
-                                    step="1" class="image-range" value="1">
-                            </div>
                             <details class="advanced-panel">
                                 <summary><span class="flex items-center gap-2"><svg class="h-4 w-4" fill="none"
                                             viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -156,6 +136,29 @@
                                     </div>
                                 </div>
                             </details>
+                            <div class="image-field field-span field-ratio">
+                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
+                                <div class="resolution-tier">
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
+                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
+                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
+                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                </div>
+                                <div class="ratio-grid">
+                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
+                                </div>
+                                <p class="input-hint">按输出尺寸最长边归档计费：≤1024 为 1K，≤2048 为 2K，更大为 4K；自动或无法识别的尺寸按 2K，质量档位不影响计费。</p>
+                            </div>
+                            <div class="image-field field-span field-prompt">
+                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
+                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
+                                    step="1" class="image-range" value="1">
+                            </div>
                             <div class="image-field field-span">
                                 <label class="input-label mb-1.5 block">提示词</label>
                                 <textarea placeholder="描述画面的主体、风格、光线、构图... 越具体效果越好" rows="5"
@@ -214,38 +217,6 @@
                                                     d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
                                             </svg></span></button></div>
                             </div>
-                            <div class="image-field field-span field-reference">
-                                <div class="image-row-label"><label class="input-label mb-0">参考图</label><span
-                                        class="image-muted">0 / 4</span></div><label class="reference-upload"><input
-                                        type=file accept="image/png,image/jpeg,image/webp" multiple class="sr-only"><svg
-                                        class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                        stroke-width="1.5">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15">
-                                        </path>
-                                    </svg><span>添加图片</span></label>
-                                <p class="input-hint">支持 PNG / JPG / WebP，单张最大 20MB，最多 4 张。</p>
-                                <div class="mock-reference-list"></div>
-                            </div>
-                            <div class="image-field field-span field-ratio">
-                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
-                                <div class="resolution-tier">
-                                    <button type="button" class="tier-btn tier-btn-active" data-tier="1k">1K</button>
-                                </div>
-                                <div class="ratio-grid">
-                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
-                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
-                                </div>
-                                <p class="input-hint">当前固定使用 1K 分辨率档位。</p>
-                            </div>
-                            <div class="image-field field-span field-prompt">
-                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
-                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
-                                    step="1" class="image-range" value="1">
-                            </div>
                             <details class="advanced-panel">
                                 <summary><span class="flex items-center gap-2"><svg class="h-4 w-4" fill="none"
                                             viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -295,6 +266,41 @@
                                     </div>
                                 </div>
                             </details>
+                            <div class="image-field field-span field-reference">
+                                <div class="image-row-label"><label class="input-label mb-0">参考图</label><span
+                                        class="image-muted">0 / 4</span></div><label class="reference-upload"><input
+                                        type=file accept="image/png,image/jpeg,image/webp" multiple class="sr-only"><svg
+                                        class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                        stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15">
+                                        </path>
+                                    </svg><span>添加图片</span></label>
+                                <p class="input-hint">支持 PNG / JPG / WebP，单张最大 20MB，最多 4 张。</p>
+                                <div class="mock-reference-list"></div>
+                            </div>
+                            <div class="image-field field-span field-ratio">
+                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
+                                <div class="resolution-tier">
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
+                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
+                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
+                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                </div>
+                                <div class="ratio-grid">
+                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
+                                </div>
+                                <p class="input-hint">按输出尺寸最长边归档计费：≤1024 为 1K，≤2048 为 2K，更大为 4K；自动或无法识别的尺寸按 2K，质量档位不影响计费。</p>
+                            </div>
+                            <div class="image-field field-span field-prompt">
+                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
+                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
+                                    step="1" class="image-range" value="1">
+                            </div>
                             <div class="image-field field-span">
                                 <label class="input-label mb-1.5 block">提示词</label>
                                 <textarea placeholder="描述画面的主体、风格、光线、构图... 越具体效果越好" rows="5"
